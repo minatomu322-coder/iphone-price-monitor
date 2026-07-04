@@ -177,13 +177,13 @@ database:
 
 discord:
   webhook_env: "DISCORD_WEBHOOK_URL"
-  notify_on_scrape_failure: true
+  notify_on_scrape_failure: false   # 海峡通信が一時的に繋がらなくても失敗通知は出さない（成功時の価格通知・毎朝まとめは従来どおり）
 
 scraping:
   timeout_seconds: 20        # readタイムアウト（秒）
-  connect_timeout: 40        # 接続確立タイムアウト（秒）。20→40に延長。
-  retry_total: 3             # リトライ回数
-  retry_backoff: 3           # バックオフ係数（3→約3秒,6秒,12秒…と間隔を延ばす）
+  connect_timeout: 30        # 接続確立タイムアウト（秒）。クラウド(Linux/IPv4)は高速接続のため30で十分＆総実行時間を抑制。
+  retry_total: 4             # リトライ回数（一時的なconnect timeoutを自己回復しやすく：3→4）
+  retry_backoff: 4           # バックオフ係数（約4秒,8秒,16秒…と間隔を延ばす：3→4）
   # user_agent は未指定。scraper.py の BROWSER_HEADERS（実在Chrome相当）を使用。
   min_price: 100000
   max_price: 400000
