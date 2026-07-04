@@ -1,0 +1,120 @@
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any
+
+import yaml
+
+from database import PriceDatabase
+from decision import alert_reasons
+from notifier import notify_alert, notify_scrape_failure, webhook_from_config
+from scraper import ScrapedOffer, scrape_site
+
+
+BASE_DIR = Path(__file__).resolve().parent
+
+
+def load_config(path: Path) -> dict[str, Any]:
+    with path.open("r", encoding="utf-8") as f:
+        return yaml.safe_load(f)
+
+
+def offer_to_record(item: dict[str, Any], offer: ScrapedOffer) -> dict[str, Any]:
+    return {
+        "item_name": item["name"],
+        "shop_name": offer.shop_name,
+        "color_key": offer.color_key,
+        "color_label": offer.color_label,
+        "capacity": offer.capacity,
+        "state": offer.state,
+        "price": offer.price,
+        "source_updated_at": offer.source_updated_at,
+        "url": offer.url,
+        "raw_text": offer.raw_text,
+    }
+
+
+def run_monitor(config_path: Path | None = None) -> int:
+    config = load_config(config_path or BASE_DIR / "config.yaml")
+    db_path = Path(config.get("database", {}).get("path", "prices.sqlite3"))
+    if not db_path.is_absolute():
+        db_path = BASE_DIR / db_path
+    db = PriceDatabase(db_path)
+    webhook_url = webhook_from_config(config)
+    thresholds = config.get("thresholds", {})
+    scraping = config.get("scraping", {})
+
+    saved_records: list[dict[str, Any]] = []
+    for item in config.get("items", []):
+        for site in config.get("sites", []):
+            if site.get("enabled") is False:
+                continue
+            # モデル別ページの振り分け（無印Pro と Pro Max でURLが異なるため）
+            if site.get("models") and item.get("model") not in site.get("models", []):
+                continue
+            if site.get("capacities") and item.get("capacity") not in site.get("capacities", []):
+                continue
+            try:
+                offers = scrape_site(site, item, scraping)
+                if not offers:
+                    raise RuntimeError("対象商品の価格候補が見つかりませんでした")
+            except Exception as exc:
+                db.insert_error(site["name"], site["url"], str(exc))
+                if config.get("discord", {}).get("notify_on_scrape_failure", True):
+                    notify_scrape_failure(webhook_url, site["name"], site["url"], str(exc))
+                continue
+
+            for offer in offers:
+                saved = db.insert_price(offer_to_record(item, offer))
+                saved_records.append(saved)
+
+        send_alerts_for_item(db, webhook_url, item, thresholds, saved_records)
+
+    return len(saved_records)
+
+
+def main() -> None:
+    saved_count = run_monitor(BASE_DIR / "config.yaml")
+    print(f"saved {saved_count} price observations")
+
+
+def send_alerts_for_item(
+    db: PriceDatabase,
+    webhook_url: str | None,
+    item: dict[str, Any],
+    thresholds: dict[str, Any],
+    saved_records: list[dict[str, Any]],
+) -> None:
+    cost_price = int(item["cost_price"])
+    repeat_hours = int(thresholds.get("alert_repeat_hours", 24))
+    sent_keys: set[tuple[str, str]] = set()
+    for color in item.get("colors", []):
+        latest_rows = [dict(row) for row in db.latest_by_color(item["name"], color["key"])]
+        if not latest_rows:
+            continue
+        best_record = max(latest_rows, key=lambda row: int(row["price"]))
+        color_saved = [
+            record
+            for record in saved_records
+            if record["item_name"] == item["name"] and record["color_key"] == color["key"]
+        ]
+        for record in color_saved:
+            reasons = alert_reasons(record, best_record, latest_rows, cost_price, thresholds)
+            reason_key = "|".join(sorted(set(reasons)))
+            key = (record["color_key"], reason_key)
+            alert_key = "|".join(
+                [
+                    item["name"],
+                    record["color_key"],
+                    reason_key,
+                    best_record["shop_name"],
+                    str(best_record["price"]),
+                ]
+            )
+            if reasons and key not in sent_keys and db.should_send_alert(alert_key, repeat_hours):
+                notify_alert(webhook_url, item, record, best_record, reasons, thresholds)
+                sent_keys.add(key)
+
+
+if __name__ == "__main__":
+    main()

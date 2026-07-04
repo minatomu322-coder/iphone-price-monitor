@@ -1,0 +1,271 @@
+items:
+  # ===== iPhone 17 Pro Max（6.9インチ / 最大2TB） =====
+  - name: "iPhone 17 Pro Max 256GB"
+    model: "iPhone 17 Pro Max"
+    cost_price: 194800
+    capacity: "256GB"
+    state_keywords:
+      - "新品"
+      - "未開封"
+      - "SIMフリー"
+      - "Apple Store"
+      - "国内版"
+    colors:
+      - key: silver
+        label: "シルバー"
+        keywords: ["シルバー", "Silver", "silver"]
+        quantity: 1
+      - key: deep_blue
+        label: "ディープブルー"
+        keywords: ["ディープブルー", "Deep Blue", "deep blue", "ブルー", "Blue", "blue"]
+        quantity: 1
+      - key: cosmic_orange
+        label: "コズミックオレンジ"
+        keywords: ["コズミックオレンジ", "Cosmic Orange", "cosmic orange", "オレンジ", "Orange", "orange"]
+        quantity: 2
+  - name: "iPhone 17 Pro Max 512GB"
+    model: "iPhone 17 Pro Max"
+    cost_price: 229800
+    capacity: "512GB"
+    state_keywords:
+      - "新品"
+      - "未開封"
+      - "SIMフリー"
+      - "Apple Store"
+      - "国内版"
+    colors:
+      - key: silver
+        label: "シルバー"
+        keywords: ["シルバー", "Silver", "silver"]
+        quantity: 0
+      - key: deep_blue
+        label: "ディープブルー"
+        keywords: ["ディープブルー", "Deep Blue", "deep blue", "ブルー", "Blue", "blue"]
+        quantity: 0
+      - key: cosmic_orange
+        label: "コズミックオレンジ"
+        keywords: ["コズミックオレンジ", "Cosmic Orange", "cosmic orange", "オレンジ", "Orange", "orange"]
+        quantity: 0
+  - name: "iPhone 17 Pro Max 1TB"
+    model: "iPhone 17 Pro Max"
+    cost_price: 264800
+    capacity: "1TB"
+    state_keywords:
+      - "新品"
+      - "未開封"
+      - "SIMフリー"
+      - "Apple Store"
+      - "国内版"
+    colors:
+      - key: silver
+        label: "シルバー"
+        keywords: ["シルバー", "Silver", "silver"]
+        quantity: 0
+      - key: deep_blue
+        label: "ディープブルー"
+        keywords: ["ディープブルー", "Deep Blue", "deep blue", "ブルー", "Blue", "blue"]
+        quantity: 0
+      - key: cosmic_orange
+        label: "コズミックオレンジ"
+        keywords: ["コズミックオレンジ", "Cosmic Orange", "cosmic orange", "オレンジ", "Orange", "orange"]
+        quantity: 0
+  - name: "iPhone 17 Pro Max 2TB"
+    model: "iPhone 17 Pro Max"
+    cost_price: 329800
+    capacity: "2TB"
+    state_keywords:
+      - "新品"
+      - "未開封"
+      - "SIMフリー"
+      - "Apple Store"
+      - "国内版"
+    colors:
+      - key: silver
+        label: "シルバー"
+        keywords: ["シルバー", "Silver", "silver"]
+        quantity: 0
+      - key: deep_blue
+        label: "ディープブルー"
+        keywords: ["ディープブルー", "Deep Blue", "deep blue", "ブルー", "Blue", "blue"]
+        quantity: 0
+      - key: cosmic_orange
+        label: "コズミックオレンジ"
+        keywords: ["コズミックオレンジ", "Cosmic Orange", "cosmic orange", "オレンジ", "Orange", "orange"]
+        quantity: 0
+  # ===== iPhone 17 Pro（6.3インチ / 最大1TB。2TBは存在しない） =====
+  - name: "iPhone 17 Pro 256GB"
+    model: "iPhone 17 Pro"
+    cost_price: 179800
+    capacity: "256GB"
+    state_keywords:
+      - "新品"
+      - "未開封"
+      - "SIMフリー"
+      - "Apple Store"
+      - "国内版"
+    colors:
+      - key: silver
+        label: "シルバー"
+        keywords: ["シルバー", "Silver", "silver"]
+        quantity: 0
+      - key: deep_blue
+        label: "ディープブルー"
+        keywords: ["ディープブルー", "Deep Blue", "deep blue", "ブルー", "Blue", "blue"]
+        quantity: 0
+      - key: cosmic_orange
+        label: "コズミックオレンジ"
+        keywords: ["コズミックオレンジ", "Cosmic Orange", "cosmic orange", "オレンジ", "Orange", "orange"]
+        quantity: 0
+  - name: "iPhone 17 Pro 512GB"
+    model: "iPhone 17 Pro"
+    cost_price: 214800
+    capacity: "512GB"
+    state_keywords:
+      - "新品"
+      - "未開封"
+      - "SIMフリー"
+      - "Apple Store"
+      - "国内版"
+    colors:
+      - key: silver
+        label: "シルバー"
+        keywords: ["シルバー", "Silver", "silver"]
+        quantity: 0
+      - key: deep_blue
+        label: "ディープブルー"
+        keywords: ["ディープブルー", "Deep Blue", "deep blue", "ブルー", "Blue", "blue"]
+        quantity: 0
+      - key: cosmic_orange
+        label: "コズミックオレンジ"
+        keywords: ["コズミックオレンジ", "Cosmic Orange", "cosmic orange", "オレンジ", "Orange", "orange"]
+        quantity: 0
+  - name: "iPhone 17 Pro 1TB"
+    model: "iPhone 17 Pro"
+    cost_price: 249800
+    capacity: "1TB"
+    state_keywords:
+      - "新品"
+      - "未開封"
+      - "SIMフリー"
+      - "Apple Store"
+      - "国内版"
+    colors:
+      - key: silver
+        label: "シルバー"
+        keywords: ["シルバー", "Silver", "silver"]
+        quantity: 0
+      - key: deep_blue
+        label: "ディープブルー"
+        keywords: ["ディープブルー", "Deep Blue", "deep blue", "ブルー", "Blue", "blue"]
+        quantity: 0
+      - key: cosmic_orange
+        label: "コズミックオレンジ"
+        keywords: ["コズミックオレンジ", "Cosmic Orange", "cosmic orange", "オレンジ", "Orange", "orange"]
+        quantity: 0
+
+thresholds:
+  rise_alert: 3000
+  drop_alert: -5000
+  near_break_even: -5000
+  shop_gap_alert: 8000
+  sell_recommend: -3000
+  watch_limit: -10000
+  alert_repeat_hours: 24
+
+database:
+  path: "prices.sqlite3"
+
+discord:
+  webhook_env: "DISCORD_WEBHOOK_URL"
+  notify_on_scrape_failure: true
+
+scraping:
+  timeout_seconds: 20        # readタイムアウト（秒）
+  connect_timeout: 40        # 接続確立タイムアウト（秒）。20→40に延長。
+  retry_total: 3             # リトライ回数
+  retry_backoff: 3           # バックオフ係数（3→約3秒,6秒,12秒…と間隔を延ばす）
+  # user_agent は未指定。scraper.py の BROWSER_HEADERS（実在Chrome相当）を使用。
+  min_price: 100000
+  max_price: 400000
+
+sites:
+  # ---- iPhone 17 Pro Max 用ページ（全容量が1ページに掲載） ----
+  - name: "サクモバ"
+    models: ["iPhone 17 Pro Max"]
+    url: "https://sakumoba.jp/smartphone/iphone/iphone17-pro-max/"
+  - name: "Suuma"
+    models: ["iPhone 17 Pro Max"]
+    # Suumaは2TB未取扱のため2TBを除外（毎回のスクレイプ失敗通知を防止）。
+    capacities: ["256GB", "512GB", "1TB"]
+    url: "https://suuma-jp.com/sell-device/iphone/iphone-pro-max/iphone17-pro-max/"
+  - name: "アメモバ"
+    models: ["iPhone 17 Pro Max"]
+    url: "https://amemoba.com/smartphone/iphone/iphone-17pro-max/"
+  - name: "ケータイ買取ドットコム"
+    models: ["iPhone 17 Pro Max"]
+    url: "https://smaho-buyer.com/price/iphone-17-pro-max-256gb/"
+    capacities: ["256GB"]
+  # 海峡通信（モバイル一番）: /Prod/1/01/37 が iPhone 17 Pro Max ページで
+  # 256/512/1TB/2TB を全て掲載。色補正は実ページ（simfree未開封）で検証した値。
+  - name: "海峡通信"
+    models: ["iPhone 17 Pro Max"]
+    enabled: true
+    url: "https://www.mobile-ichiban.com/Prod/1/01/37"
+    force_ipv4: true            # IPv6ではなくIPv4(A)で接続（Mac側connect timeout対策）
+    request_delay_seconds: 3    # リクエスト前に待機（レート制限回避）
+    capacities: ["256GB", "512GB", "1TB", "2TB"]
+    color_adjustments_by_capacity:
+      256GB:
+        silver: 0
+        deep_blue: -3000
+        cosmic_orange: -3000
+      512GB:
+        silver: 0
+        deep_blue: 0
+        cosmic_orange: 0
+      1TB:
+        silver: 0
+        deep_blue: 0
+        cosmic_orange: -4000
+      2TB:
+        silver: 0
+        deep_blue: 0
+        cosmic_orange: 0
+  # ---- iPhone 17 Pro（6.3インチ）用ページ（モデルごとにURLが異なる） ----
+  - name: "サクモバ"
+    models: ["iPhone 17 Pro"]
+    url: "https://sakumoba.jp/smartphone/iphone/iphone17-pro/"
+  - name: "Suuma"
+    models: ["iPhone 17 Pro"]
+    url: "https://suuma-jp.com/sell-device/iphone/iphone-pro/iphone17-pro/"
+  - name: "アメモバ"
+    models: ["iPhone 17 Pro"]
+    url: "https://amemoba.com/smartphone/iphone/iphone-17-pro/"
+  # 無印Pro用URLが未確認（推定URLは404）。正しいURL判明までは無効化（404通知の抑止）。
+  - name: "ケータイ買取ドットコム"
+    models: ["iPhone 17 Pro"]
+    enabled: false
+    url: "https://smaho-buyer.com/price/iphone-17-pro-256gb/"
+    capacities: ["256GB"]
+  # 海峡通信（モバイル一番）: /Prod/1/01/36 が iPhone 17 Pro（無印）ページで
+  # 256/512/1TB を掲載。色補正は実ページ（simfree未開封）で検証した値。
+  - name: "海峡通信"
+    models: ["iPhone 17 Pro"]
+    enabled: true
+    url: "https://www.mobile-ichiban.com/Prod/1/01/36"
+    force_ipv4: true            # IPv6ではなくIPv4(A)で接続（Mac側connect timeout対策）
+    request_delay_seconds: 3    # リクエスト前に待機（レート制限回避）
+    capacities: ["256GB", "512GB", "1TB"]
+    color_adjustments_by_capacity:
+      256GB:
+        silver: 0
+        deep_blue: -2000
+        cosmic_orange: 0
+      512GB:
+        silver: 0
+        deep_blue: 0
+        cosmic_orange: 0
+      1TB:
+        silver: 0
+        deep_blue: 0
+        cosmic_orange: 0
