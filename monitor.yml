@@ -1,0 +1,57 @@
+name: iPhone買取価格モニター
+
+on:
+  schedule:
+    # 30分ごと（GitHubのcronはUTC基準。JST表示はコード側 TZ=Asia/Tokyo で処理）
+    - cron: "*/30 * * * *"
+  workflow_dispatch: {}          # 手動実行ボタン
+
+# prices.sqlite3 をリポジトリに commit で戻すため書き込み権限が必要
+permissions:
+  contents: write
+
+# 実行の重複を防止（前の実行が終わるまで新しい実行は待機。DB破損防止のため中断はしない）
+concurrency:
+  group: price-monitor
+  cancel-in-progress: false
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: リポジトリを取得
+        uses: actions/checkout@v4
+
+      - name: Python 3.11 を準備
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: 依存パッケージをインストール
+        run: pip install -r requirements.txt
+
+      - name: 価格監視を実行（1回・JST）
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          TZ: Asia/Tokyo
+        run: python main.py
+
+      - name: 価格DB(prices.sqlite3)の変化をコミットして保存
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if [ -n "$(git status --porcelain prices.sqlite3)" ]; then
+            git add prices.sqlite3
+            git commit -m "price data update [skip ci]"
+            # 他のコミットと競合した場合に備え、rebaseして最大3回まで再試行
+            for i in 1 2 3; do
+              if git push; then
+                echo "push成功"; break
+              fi
+              echo "push失敗。rebaseして再試行 ($i/3)"
+              git pull --rebase --autostash origin "${GITHUB_REF_NAME}" && sleep 3
+            done
+          else
+            echo "prices.sqlite3 に変化なし。コミットは行いません。"
+          fi
