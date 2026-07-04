@@ -1,0 +1,31 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# --- 実行時の一時ファイル・ゴミ ---
+*.pid
+*.log
+app.log
+tunnel.log
+
+# --- バックアップ（*.bak / *.bak2 / *.bak_ipv4 など全て） ---
+*.bak
+*.bak*
+
+# --- シークレット（絶対にコミットしない） ---
+webhook.txt
+.env
+
+# --- Mac側cronの退避バックアップ（ローカル専用・コミット不要） ---
+crontab_backup_*.txt
+
+# --- Mac ---
+.DS_Store
+*.command
+
+# --- 価格履歴DBは「状態保持」のためコミット対象。無視しない（明示） ---
+!prices.sqlite3

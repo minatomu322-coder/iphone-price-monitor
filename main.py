@@ -99,7 +99,15 @@ def send_alerts_for_item(
             if record["item_name"] == item["name"] and record["color_key"] == color["key"]
         ]
         for record in color_saved:
+            # 通知過多対策：前回から価格が変化した時だけ通知する。
+            # diff は「今回価格 - 前回価格」。None(初回で比較対象なし)や 0(変化なし)は黙って抑制。
+            diff = record.get("diff")
+            if diff is None or diff == 0:
+                continue
             reasons = alert_reasons(record, best_record, latest_rows, cost_price, thresholds)
+            # しきい値系の理由が無くても、価格が動いた事実は必ず知らせる（1変化=1通知）。
+            if not reasons:
+                reasons = [f"前回比 {diff:+,}円 変動"]
             reason_key = "|".join(sorted(set(reasons)))
             key = (record["color_key"], reason_key)
             alert_key = "|".join(

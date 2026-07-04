@@ -189,22 +189,8 @@ scraping:
   max_price: 400000
 
 sites:
-  # ---- iPhone 17 Pro Max 用ページ（全容量が1ページに掲載） ----
-  - name: "サクモバ"
-    models: ["iPhone 17 Pro Max"]
-    url: "https://sakumoba.jp/smartphone/iphone/iphone17-pro-max/"
-  - name: "Suuma"
-    models: ["iPhone 17 Pro Max"]
-    # Suumaは2TB未取扱のため2TBを除外（毎回のスクレイプ失敗通知を防止）。
-    capacities: ["256GB", "512GB", "1TB"]
-    url: "https://suuma-jp.com/sell-device/iphone/iphone-pro-max/iphone17-pro-max/"
-  - name: "アメモバ"
-    models: ["iPhone 17 Pro Max"]
-    url: "https://amemoba.com/smartphone/iphone/iphone-17pro-max/"
-  - name: "ケータイ買取ドットコム"
-    models: ["iPhone 17 Pro Max"]
-    url: "https://smaho-buyer.com/price/iphone-17-pro-max-256gb/"
-    capacities: ["256GB"]
+  # ★通知過多対策：海峡通信のみに絞り込み（サクモバ/Suuma/アメモバ/ケータイ買取ドットコムは除外）。
+  #   1店舗のみのため「店舗間価格差」アラートは発生しなくなる。
   # 海峡通信（モバイル一番）: /Prod/1/01/37 が iPhone 17 Pro Max ページで
   # 256/512/1TB/2TB を全て掲載。色補正は実ページ（simfree未開封）で検証した値。
   - name: "海峡通信"
@@ -231,22 +217,6 @@ sites:
         silver: 0
         deep_blue: 0
         cosmic_orange: 0
-  # ---- iPhone 17 Pro（6.3インチ）用ページ（モデルごとにURLが異なる） ----
-  - name: "サクモバ"
-    models: ["iPhone 17 Pro"]
-    url: "https://sakumoba.jp/smartphone/iphone/iphone17-pro/"
-  - name: "Suuma"
-    models: ["iPhone 17 Pro"]
-    url: "https://suuma-jp.com/sell-device/iphone/iphone-pro/iphone17-pro/"
-  - name: "アメモバ"
-    models: ["iPhone 17 Pro"]
-    url: "https://amemoba.com/smartphone/iphone/iphone-17-pro/"
-  # 無印Pro用URLが未確認（推定URLは404）。正しいURL判明までは無効化（404通知の抑止）。
-  - name: "ケータイ買取ドットコム"
-    models: ["iPhone 17 Pro"]
-    enabled: false
-    url: "https://smaho-buyer.com/price/iphone-17-pro-256gb/"
-    capacities: ["256GB"]
   # 海峡通信（モバイル一番）: /Prod/1/01/36 が iPhone 17 Pro（無印）ページで
   # 256/512/1TB を掲載。色補正は実ページ（simfree未開封）で検証した値。
   - name: "海峡通信"
