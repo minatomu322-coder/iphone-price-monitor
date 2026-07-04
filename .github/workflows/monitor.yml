@@ -20,7 +20,7 @@ concurrency:
 jobs:
   monitor:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30          # 海峡通信が不調な日でもリトライ完走できる安全側の上限（通常は数十秒で終了）
     steps:
       - name: リポジトリを取得
         uses: actions/checkout@v4
