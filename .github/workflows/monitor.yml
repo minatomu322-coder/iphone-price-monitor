@@ -2,9 +2,11 @@ name: iPhone買取価格モニター
 
 on:
   schedule:
-    # 30分ごと（GitHubのcronはUTC基準。JST表示はコード側 TZ=Asia/Tokyo で処理）
+    # 30分ごと（変化時のみ通知）。GitHubのcronはUTC基準。
     - cron: "*/30 * * * *"
-  workflow_dispatch: {}          # 手動実行ボタン
+    # 毎朝10:00 JST（=01:00 UTC）にデイリーまとめを必ず通知（FORCE_NOTIFY）。
+    - cron: "0 1 * * *"
+  workflow_dispatch: {}          # 手動実行ボタン（通常動作＝変化時のみ）
 
 # prices.sqlite3 をリポジトリに commit で戻すため書き込み権限が必要
 permissions:
@@ -35,6 +37,9 @@ jobs:
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
           TZ: Asia/Tokyo
+          # 01:00 UTC(=10:00 JST)のスケジュール発火時のみ FORCE_NOTIFY=1（デイリーまとめ）。
+          # 30分ごと・手動実行では空文字＝通常動作（変化時のみ通知）。
+          FORCE_NOTIFY: ${{ github.event.schedule == '0 1 * * *' && '1' || '' }}
         run: python main.py
 
       - name: 価格DB(prices.sqlite3)の変化をコミットして保存
