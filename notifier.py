@@ -53,6 +53,32 @@ def notify_alert(
     send_discord(webhook_url, content)
 
 
+def notify_daily_summary(
+    webhook_url: str | None,
+    summaries: list[dict[str, Any]],
+    when_label: str,
+) -> None:
+    """デイリーまとめ（価格変化の有無に関わらず全アイテムを1通で通知）。"""
+    lines = [
+        f"【iPhone買取価格 デイリーまとめ】{when_label}",
+        "※価格変化の有無に関わらず毎朝お届けします（海峡通信）",
+        "",
+    ]
+    for s in summaries:
+        lines.append(f"■ {s['name']}")
+        if s.get("best_price") is None:
+            lines.append("　最高買取：データなし（今回は価格を取得できませんでした）")
+        else:
+            lines.append(
+                f"　最高買取 {int(s['best_price']):,}円"
+                f"（{s.get('best_color', '-')} / {s.get('best_shop', '-')}）"
+            )
+            lines.append(
+                f"　原価 {int(s['cost_price']):,}円 ／ 差額 {int(s['profit']):+,}円 → {s.get('decision', '-')}"
+            )
+    send_discord(webhook_url, "\n".join(lines).rstrip())
+
+
 def notify_scrape_failure(webhook_url: str | None, shop_name: str, url: str, error: str) -> None:
     content = "\n".join(
         [

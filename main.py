@@ -1,13 +1,20 @@
 from __future__ import annotations
 
+import os
+from datetime import date
 from pathlib import Path
 from typing import Any
 
 import yaml
 
 from database import PriceDatabase
-from decision import alert_reasons
-from notifier import notify_alert, notify_scrape_failure, webhook_from_config
+from decision import alert_reasons, judge
+from notifier import (
+    notify_alert,
+    notify_daily_summary,
+    notify_scrape_failure,
+    webhook_from_config,
+)
 from scraper import ScrapedOffer, scrape_site
 
 
@@ -70,7 +77,50 @@ def run_monitor(config_path: Path | None = None) -> int:
 
         send_alerts_for_item(db, webhook_url, item, thresholds, saved_records)
 
+    # デイリーまとめ：FORCE_NOTIFY=1 のときは、価格変化の有無に関わらず
+    # 監視中の全アイテムの現在価格・原価差額・判断を必ず通知する。
+    if os.getenv("FORCE_NOTIFY"):
+        summaries = build_daily_summary(db, config.get("items", []), thresholds)
+        notify_daily_summary(webhook_url, summaries, str(date.today()))
+
     return len(saved_records)
+
+
+def build_daily_summary(
+    db: PriceDatabase,
+    items: list[dict[str, Any]],
+    thresholds: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """各アイテムの最新（最高）買取価格・原価差額・判断をまとめる。"""
+    summaries: list[dict[str, Any]] = []
+    for item in items:
+        cost_price = int(item["cost_price"])
+        best_row: dict[str, Any] | None = None
+        best_color: str | None = None
+        for color in item.get("colors", []):
+            rows = [dict(row) for row in db.latest_by_color(item["name"], color["key"])]
+            if not rows:
+                continue
+            row = max(rows, key=lambda r: int(r["price"]))
+            if best_row is None or int(row["price"]) > int(best_row["price"]):
+                best_row = row
+                best_color = color.get("label")
+        if best_row is None:
+            summaries.append({"name": item["name"], "cost_price": cost_price, "best_price": None})
+            continue
+        price = int(best_row["price"])
+        summaries.append(
+            {
+                "name": item["name"],
+                "cost_price": cost_price,
+                "best_price": price,
+                "best_color": best_color,
+                "best_shop": best_row.get("shop_name"),
+                "profit": price - cost_price,
+                "decision": judge(price, cost_price, thresholds).label,
+            }
+        )
+    return summaries
 
 
 def main() -> None:
