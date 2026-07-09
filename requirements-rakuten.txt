@@ -1,0 +1,10 @@
+# 利益商品AI（rakuten_finder）の依存パッケージ
+requests>=2.31,<3
+PyYAML>=6.0,<7
+python-dotenv>=1.0,<2
+fastapi>=0.110,<1
+uvicorn>=0.29,<1
+jinja2>=3.1,<4
+python-multipart>=0.0.9,<1
+pytest>=8.0,<9
+httpx>=0.27,<1

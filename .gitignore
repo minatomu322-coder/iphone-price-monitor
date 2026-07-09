@@ -29,3 +29,9 @@ crontab_backup_*.txt
 
 # --- 価格履歴DBは「状態保持」のためコミット対象。無視しない（明示） ---
 !prices.sqlite3
+
+# --- 利益商品AI（rakuten_finder） ---
+# 相場CSVはローカル管理（サンプルのみコミット）。DBは状態保持のためコミット対象。
+data/mercari_prices.csv
+!data/mercari_prices.sample.csv
+!data/rakuten_finder.sqlite3

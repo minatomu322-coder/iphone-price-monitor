@@ -1,0 +1,67 @@
+name: 利益商品AI（rakuten_finder）
+
+on:
+  schedule:
+    # 60分ごとに巡回（GitHub の cron は UTC 基準）
+    - cron: "0 * * * *"
+    # 毎朝 10:00 JST（= 01:00 UTC）に日次レポート
+    - cron: "5 1 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write   # DB(sqlite3) をコミットして状態を保持するため
+
+concurrency:
+  group: rakuten-finder
+  cancel-in-progress: false
+
+jobs:
+  finder:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: リポジトリを取得
+        uses: actions/checkout@v4
+
+      - name: Python 3.11 を準備
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: 依存パッケージをインストール
+        run: pip install -r requirements-rakuten.txt
+
+      - name: テスト実行
+        run: python -m pytest tests/ -q
+
+      - name: 巡回を実行
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          RAKUTEN_APP_ID: ${{ secrets.RAKUTEN_APP_ID }}
+          RAKUTEN_AFFILIATE_ID: ${{ secrets.RAKUTEN_AFFILIATE_ID }}
+          TZ: Asia/Tokyo
+        run: python -m rakuten_finder.cli run
+
+      - name: 日次レポート（01:05 UTC のスケジュールのみ）
+        if: github.event.schedule == '5 1 * * *'
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          RAKUTEN_APP_ID: ${{ secrets.RAKUTEN_APP_ID }}
+          TZ: Asia/Tokyo
+        run: python -m rakuten_finder.cli report
+
+      - name: DB の変化をコミットして保存
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if [ -n "$(git status --porcelain data/rakuten_finder.sqlite3)" ]; then
+            git add data/rakuten_finder.sqlite3
+            git commit -m "rakuten finder data update [skip ci]"
+            for i in 1 2 3; do
+              if git push; then echo "push成功"; break; fi
+              echo "push失敗。rebaseして再試行 ($i/3)"
+              git pull --rebase --autostash origin "${GITHUB_REF_NAME}" && sleep 3
+            done
+          else
+            echo "DB に変化なし。コミットは行いません。"
+          fi

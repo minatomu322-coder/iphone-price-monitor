@@ -1,0 +1,60 @@
+# 利益商品AI（rakuten_finder）設定
+#
+# シークレット（アプリID / Webhook）は .env で管理する。ここには書かない。
+
+rakuten:
+  app_id_env: "RAKUTEN_APP_ID"            # 楽天ウェブサービスのアプリID（.envで設定）
+  affiliate_id_env: "RAKUTEN_AFFILIATE_ID" # 任意（アフィリエイトIDがあれば）
+  hits_per_keyword: 30                     # 1キーワードあたりの取得件数（API上限30）
+  request_delay_seconds: 1                 # API呼び出し間の待機（レート制限 1req/s 対策）
+
+discord:
+  webhook_env: "DISCORD_WEBHOOK_URL"
+
+database:
+  path: "data/rakuten_finder.sqlite3"      # .env の RAKUTEN_FINDER_DB があれば優先
+
+mercari:
+  # メルカリ相場（手入力/半手動）の CSV。フォーマットは data/mercari_prices.sample.csv 参照
+  csv_path: "data/mercari_prices.csv"
+
+# 利益計算の想定値
+assumptions:
+  spu_rate: 5              # SPU 想定倍率(%)。自分の SPU に合わせて変更
+  campaign_rate: 0         # 買い回り・5と0の日・勝ったら倍などの想定上乗せ(%)
+  point_cap: 0             # 獲得ポイント上限（円）。0=無制限
+  mercari_fee_rate: 0.10   # メルカリ販売手数料
+  shipping_out: 200        # 発送時の想定送料（らくらくメルカリ便ネコポス想定）
+  default_shipping_in: 0   # 「送料別」商品の仮定送料
+  sell_percentile: median  # 売価の想定: median | min | avg（minが最も保守的）
+
+# 通知・評価しきい値
+thresholds:
+  min_profit: 1000         # これ未満の利益は通知しない（円）
+  min_roi: 0.10            # これ未満の ROI は通知しない
+  notify_rank: ["S", "A"]  # 通知するランク
+  alert_repeat_hours: 24   # 同一条件の再通知間隔
+
+# スコアリングの重み（合計1.0推奨）と正規化基準
+scoring:
+  weights:
+    profit: 0.35
+    roi: 0.25
+    turnover: 0.20
+    scarcity: 0.10
+    stability: 0.10
+    profit_norm: 5000      # 利益5,000円でスコア1.0
+    roi_norm: 0.30         # ROI30%でスコア1.0
+    turnover_norm: 30      # 直近30件売れていればスコア1.0
+
+# 監視対象。keyword は必須。genre_id / 価格帯 / NGワードで絞り込み可能。
+# 楽天ブックス・楽天24 も「キーワード＋ジャンル」でここに足せる（v0.3で専用API対応予定）
+targets:
+  - keyword: "Nintendo Switch 有機EL"
+    min_price: 20000
+    max_price: 45000
+    ng_keywords: ["中古", "ジャンク", "訳あり"]
+  - keyword: "Anker PowerCore"
+    min_price: 2000
+    max_price: 15000
+    ng_keywords: ["中古"]

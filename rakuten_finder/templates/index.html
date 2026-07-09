@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>利益商品AI ダッシュボード</title>
+  <style>
+    :root { color-scheme: light dark; }
+    body { font-family: "Hiragino Sans", "Noto Sans JP", sans-serif; margin: 1.5rem; }
+    h1 { font-size: 1.3rem; }
+    .filters { margin-bottom: 1rem; display: flex; gap: .5rem; flex-wrap: wrap; }
+    .filters a { text-decoration: none; padding: .25rem .7rem; border: 1px solid #8884;
+                 border-radius: 999px; font-size: .85rem; color: inherit; }
+    .filters a.active { background: #3b82f6; color: #fff; border-color: #3b82f6; }
+    table { border-collapse: collapse; width: 100%; font-size: .85rem; }
+    th, td { border-bottom: 1px solid #8883; padding: .45rem .5rem; text-align: right;
+             white-space: nowrap; }
+    th { position: sticky; top: 0; background: Canvas; }
+    td.name, th.name { text-align: left; white-space: normal; min-width: 16rem; }
+    td.name img { width: 42px; height: 42px; object-fit: contain; vertical-align: middle;
+                  margin-right: .4rem; border-radius: 4px; }
+    .rank { font-weight: 700; padding: .1rem .5rem; border-radius: 4px; color: #fff; }
+    .rank-S { background: #9b59b6; } .rank-A { background: #3498db; }
+    .rank-B { background: #2ecc71; } .rank-C { background: #f1c40f; color: #333; }
+    .rank-D { background: #95a5a6; }
+    .plus { color: #16a34a; font-weight: 600; } .minus { color: #dc2626; }
+    .decision-form { display: inline-flex; gap: .2rem; }
+    .decision-form button { border: 1px solid #8886; background: transparent; cursor: pointer;
+                            border-radius: 4px; padding: .15rem .45rem; font-size: .8rem; }
+    .decided { font-weight: 700; }
+    .warn { color: #d97706; font-size: .75rem; white-space: normal; max-width: 14rem; }
+    .muted { opacity: .6; }
+    .scroll { overflow-x: auto; }
+  </style>
+</head>
+<body>
+  <h1>利益商品AI ダッシュボード</h1>
+
+  <div class="filters">
+    <a href="/" class="{{ 'active' if not rank_filter and not decision_filter }}">すべて</a>
+    {% for r in ['S', 'A', 'B', 'C', 'D'] %}
+      <a href="/?rank={{ r }}" class="{{ 'active' if rank_filter == r }}">{{ r }}ランク</a>
+    {% endfor %}
+    <a href="/?decision=buy" class="{{ 'active' if decision_filter == 'buy' }}">買う</a>
+    <a href="/?decision=hold" class="{{ 'active' if decision_filter == 'hold' }}">保留</a>
+    <a href="/?decision=skip" class="{{ 'active' if decision_filter == 'skip' }}">見送り</a>
+    <a href="/?decision=none" class="{{ 'active' if decision_filter == 'none' }}">未判断</a>
+  </div>
+
+  <div class="scroll">
+  <table>
+    <thead>
+      <tr>
+        <th class="name">商品</th>
+        <th>ランク</th>
+        <th>利益</th>
+        <th>ROI</th>
+        <th>楽天価格</th>
+        <th>実質仕入</th>
+        <th>メルカリ相場</th>
+        <th>売れた数</th>
+        <th>出品中</th>
+        <th>通知</th>
+        <th>判断</th>
+        <th>警告</th>
+        <th>検索日時</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in rows %}
+      <tr>
+        <td class="name">
+          {% if row.image_url %}<img src="{{ row.image_url }}" alt="" loading="lazy">{% endif %}
+          <a href="{{ row.url }}" target="_blank" rel="noopener">{{ row.name[:80] }}</a>
+          <div class="muted">{{ row.shop_name }} / {{ row.keyword }}</div>
+        </td>
+        <td><span class="rank rank-{{ row.rank }}">{{ row.rank }}</span> {{ '%.0f' % row.score }}</td>
+        <td class="{{ 'plus' if row.profit >= 0 else 'minus' }}">{{ '{:+,}'.format(row.profit) }}円</td>
+        <td>{{ '%.1f%%' % (row.roi * 100) }}</td>
+        <td>{{ '{:,}'.format(row.rakuten_price) }}円</td>
+        <td>{{ '{:,}'.format(row.effective_cost) }}円</td>
+        <td>{{ '{:,}'.format(row.sell_price) }}円</td>
+        <td>{{ row.sold_count }}</td>
+        <td>{{ row.active_count }}</td>
+        <td>{{ '✅' if row.notified else '—' }}</td>
+        <td>
+          {% if row.decision %}
+            <span class="decided">{{ {'buy': '🛒買う', 'skip': '❌見送り', 'hold': '⏸保留'}[row.decision] }}</span>
+          {% else %}
+            <form method="post" action="/decide" class="decision-form">
+              <input type="hidden" name="item_code" value="{{ row.item_code }}">
+              <button name="decision" value="buy">買う</button>
+              <button name="decision" value="hold">保留</button>
+              <button name="decision" value="skip">見送り</button>
+            </form>
+          {% endif %}
+        </td>
+        <td class="warn">{{ row.warnings or '' }}</td>
+        <td class="muted">{{ row.observed_at[:16] }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="13" style="text-align:center; padding:2rem;">
+        データがありません。<code>python -m rakuten_finder.cli run</code> を実行してください。
+      </td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</body>
+</html>
