@@ -1,0 +1,124 @@
+# メルカリ販売管理システム 運用ガイド
+
+## 役割分担
+
+| 担当 | 役割 |
+| --- | --- |
+| ChatGPT | 画像から商品判断・出品文作成・価格提案・仕入れ最終レビュー・売れ残り改善・購入者対応文・月次分析 |
+| このシステム（Claude Code実装） | データ保存・利益/ROI計算・一次判定・相場履歴・集計・ChatGPT向けデータ出力・Discord通知・バックアップ |
+| あなた | 仕入れの最終決定・購入操作・本出品・発送・取引対応・評価 |
+
+**このシステムは自動で購入・本出品・削除・キャンセル・購入者への送信を行いません。**
+ChatGPTへの連携は初期MVPでは手動コピー（画面の「〜にコピー」ボタン）で行います。
+
+## 起動方法
+
+```bash
+# ダッシュボード（ブラウザで http://127.0.0.1:8766 を開く）
+python -m mercari.cli serve
+
+# ポートを変える場合
+python -m mercari.cli serve --port 8888
+```
+
+既存のiPhone買取監視（`main.py` / `app.py` / GitHub Actions）とは独立しており、影響しません。
+
+## 基本の運用フロー
+
+### 1. 仕入れ時
+
+1. 「登録・入力」タブで商品を**仕入れ候補**として登録（仕入れ価格・送料・仕入れ元URLなど）
+2. メルカリで売り切れ検索し、相場（最安値・中央値・件数）を**相場データ**として登録
+3. 商品一覧に**一次判定**（買い候補/条件付き候補/見送り候補/追加確認）が表示される
+4. `python -m mercari.cli notify-candidates` で一次判定通過分をDiscordへ通知できる
+5. 「**仕入れ判断用にコピー**」→ ChatGPTへ貼り付け → 最終レビュー（買い/条件付き/見送り/追加確認）
+6. あなたが最終決定。買うならステータスを**仕入れ済み**へ変更
+
+### 2. 出品時
+
+1. ChatGPTへ商品画像を送り、商品を特定・状態確認してもらう
+2. 「**出品作成用にコピー**」でシステムの相場・仕入れデータをChatGPTへ渡す
+3. ChatGPTがタイトル・説明文・価格3案と**出品用JSON**を作成（プロンプトは docs/chatgpt_prompts.md）
+4. 「出品JSON取り込み」タブへ貼り付け → **下書き**として保存される
+5. 内容を確認し、あなたがメルカリアプリで本出品
+6. 出品したら「出品の登録・更新」でステータスを**出品中**にし、出品日を記録
+
+### 3. 売れ残り改善時
+
+1. 出品から規定日数（既定14日、`mercari_config.yaml` の `stale_days`）を超えると商品一覧に「売れ残り」バッジが付く
+2. 閲覧数・いいね数・コメント数を「出品の登録・更新」で最新化しておく
+3. 「**売れ残り分析用にコピー**」→ ChatGPTへ貼り付け → 売れない理由の分析と改善案をもらう
+4. 採用した改善は「改善の記録」に残す（次回の分析でChatGPTに履歴として渡る）
+5. 値下げしたら「値下げの記録」に残す
+
+### 4. 売れた時
+
+1. 「売却の記録」で売却価格・手数料（空欄なら10%自動計算）・送料を登録
+2. 商品と出品のステータスは自動で**売却済み**になる
+
+### 5. 月次分析時
+
+1. 「売上分析」タブで期間を指定（未指定なら当月）
+2. 「**ChatGPT分析用にコピー**」→ ChatGPTへ貼り付け
+3. カテゴリー別・仕入れ先別の実績、長期在庫、赤字商品、利益上位/下位が渡り、
+   増やすジャンル・撤退ジャンル・翌月の改善行動を提案してもらう
+4. システム自体の改善指示が出た場合は、その文章をそのままClaude Codeへ渡す
+
+## 出力形式
+
+すべての出力は画面上部の「コピー形式」で切り替えられます。
+
+- **テキスト**: ChatGPTへそのまま貼れる日本語（既定）
+- **Markdown**: 表形式で見やすい
+- **JSON**: 生値入り。API連携やスプレッドシート加工向け
+- **CSV**: 表計算ソフト向け
+
+CLIでも同じものが出せます:
+
+```bash
+python -m mercari.cli export --kind sourcing --item 1 --format text
+python -m mercari.cli export --kind listing  --item 1 --format markdown
+python -m mercari.cli export --kind stale    --item 1
+python -m mercari.cli export --kind sales --from 2026-07-01 --to 2026-07-31
+```
+
+## 一次判定の基準（mercari_config.yaml で調整可能）
+
+| 判定 | 条件 |
+| --- | --- |
+| 買い候補 | 相場価格で利益 ≥ `min_profit`（既定1,000円）かつ ROI ≥ `min_roi`（既定15%） |
+| 条件付き候補 | 利益は出るが基準未満 |
+| 見送り候補 | 相場価格で赤字 |
+| 追加確認 | 仕入れ価格 or 相場が未登録、売り切れ件数 < `min_sold_count`（既定3件） |
+
+補助警告: 供給過多（販売中÷売り切れ ≥ 3.0）、相場中央値の下落傾向。
+**一次判定は機械的なスクリーニングです。最終判断は必ずChatGPTのレビューとあなたの確認を通してください。**
+
+## その他のコマンド
+
+```bash
+# データベースのバックアップ（backups/ へ日時付きコピー）
+python -m mercari.cli backup
+
+# テーブルをCSVへ書き出し（items / listings / sales / market_snapshots / improvements / price_changes）
+python -m mercari.cli dump-csv --table sales --out sales.csv
+
+# ChatGPTの出品用JSONをCLIから取り込み
+python -m mercari.cli import-listing --file draft.json
+
+# Discordへ仕入れ候補を通知（DISCORD_WEBHOOK_URL 環境変数を使用）
+python -m mercari.cli notify-candidates
+```
+
+## 将来のOpenAI API連携について
+
+初期MVPは手動コピー運用です。`mercari_config.yaml` の `openai:` セクションに
+将来の自動連携の枠（APIキーは環境変数・1回あたり上限・回数制限・送信前確認）を
+用意してあり、データベースにも利用料金記録用の `api_usage` テーブルがあります。
+APIキーをコードや設定ファイルへ直書きしないでください。
+
+## テスト
+
+```bash
+python -m unittest tests.test_mercari
+```

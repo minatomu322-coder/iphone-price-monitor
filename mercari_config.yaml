@@ -1,0 +1,34 @@
+# メルカリ販売管理・ChatGPT連携の設定
+# （既存のiPhone買取監視 config.yaml とは独立）
+
+database:
+  path: "mercari.sqlite3"
+
+fees:
+  default_rate: 0.10        # メルカリ販売手数料10%
+
+pricing:
+  quick_ratio: 0.90         # 早売り価格 = 相場中央値 × 0.90
+  standard_ratio: 1.00      # 相場価格   = 相場中央値 × 1.00
+  strong_ratio: 1.08        # 強気価格   = 相場中央値 × 1.08
+  round_to: 100             # 価格は100円単位に丸める
+
+thresholds:
+  min_profit: 1000          # 一次判定「買い候補」の最低利益（円）
+  min_roi: 0.15             # 一次判定「買い候補」の最低ROI
+  min_sold_count: 3         # 売り切れ件数がこれ未満なら「追加確認」
+  max_active_ratio: 3.0     # 販売中件数÷売り切れ件数 がこれ以上なら供給過多の注意
+  stale_days: 14            # 出品からこの日数売れなければ「売れ残り」
+  long_stock_days: 30       # 仕入れからこの日数超の在庫を「長期在庫」
+
+discord:
+  webhook_env: "DISCORD_WEBHOOK_URL"
+
+# 将来のOpenAI API連携用（初期MVPでは手動コピー運用のため無効）
+# APIキーはコードや設定に直書きせず、環境変数で渡すこと。
+openai:
+  enabled: false
+  api_key_env: "OPENAI_API_KEY"
+  max_cost_per_call_yen: 50   # 1回あたりの上限
+  max_calls_per_day: 50       # 自動実行回数の上限
+  confirm_before_send: true   # 送信前にユーザーが内容を確認する

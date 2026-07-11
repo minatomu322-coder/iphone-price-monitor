@@ -29,3 +29,7 @@ crontab_backup_*.txt
 
 # --- 価格履歴DBは「状態保持」のためコミット対象。無視しない（明示） ---
 !prices.sqlite3
+
+# --- メルカリ販売管理（在庫・売上データはローカル運用。backupsコマンドで退避） ---
+mercari.sqlite3
+backups/
