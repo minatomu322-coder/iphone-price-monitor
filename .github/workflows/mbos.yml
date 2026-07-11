@@ -1,0 +1,84 @@
+name: MINATO Brand OS
+
+on:
+  schedule:
+    # cronはUTC基準。JSTは+9時間。
+    - cron: "0 2 * * *"    # 11:00 JST 毎朝バッチ（収集＋分析）
+    - cron: "0 3 * * *"    # 12:00 JST 便①（今日いいねする100人＋最重要人物）
+    - cron: "30 8 * * *"   # 17:30 JST 便②（進捗リマインド＋追加候補）
+    - cron: "0 13 * * *"   # 22:00 JST 便③（リプ5-10人＋コピペ文）
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 手動実行するアクション
+        type: choice
+        default: daily
+        options: [daily, noon, evening, night]
+
+# data/brand_os.sqlite3 を commit で戻すため書き込み権限が必要
+permissions:
+  contents: write
+
+# DB破損防止：前の実行が終わるまで待機（中断しない）
+concurrency:
+  group: minato-brand-os
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: 依存インストール
+        run: pip install -r requirements-mbos.txt
+
+      - name: スケジュール→アクションを決定
+        id: pick
+        env:
+          SCHEDULE: ${{ github.event.schedule }}
+          INPUT_ACTION: ${{ github.event.inputs.action }}
+        run: |
+          case "$SCHEDULE" in
+            "0 2 * * *")  echo "action=daily"   >> "$GITHUB_OUTPUT" ;;
+            "0 3 * * *")  echo "action=noon"    >> "$GITHUB_OUTPUT" ;;
+            "30 8 * * *") echo "action=evening" >> "$GITHUB_OUTPUT" ;;
+            "0 13 * * *") echo "action=night"   >> "$GITHUB_OUTPUT" ;;
+            *)            echo "action=${INPUT_ACTION:-daily}" >> "$GITHUB_OUTPUT" ;;
+          esac
+
+      - name: 実行
+        env:
+          MBOS_DISCORD_WEBHOOK_URL: ${{ secrets.MBOS_DISCORD_WEBHOOK_URL }}
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          TZ: Asia/Tokyo
+        run: |
+          set -e
+          case "${{ steps.pick.outputs.action }}" in
+            daily)   python mbos.py daily ;;
+            noon)    python mbos.py notify --slot noon ;;
+            evening) python mbos.py notify --slot evening ;;
+            night)   python mbos.py notify --slot night ;;
+          esac
+
+      - name: DB変化をコミット
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if [ -n "$(git status --porcelain data/brand_os.sqlite3)" ]; then
+            git add data/brand_os.sqlite3
+            git commit -m "brand os data update [skip ci]"
+            for i in 1 2 3; do
+              if git push; then echo "push成功"; break; fi
+              echo "push失敗。rebaseして再試行 ($i/3)"
+              git pull --rebase --autostash origin "${GITHUB_REF_NAME}" && sleep 3
+            done
+          else
+            echo "DB変化なし"
+          fi

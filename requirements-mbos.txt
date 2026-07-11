@@ -1,0 +1,5 @@
+# MINATO Brand OS の依存（iPhone価格監視の requirements.txt とは分離）
+requests>=2.31,<3
+PyYAML>=6.0,<7
+# 任意: ANTHROPIC_API_KEY を設定した時だけ使用（未設定ならヒューリスティック採点で動作）
+anthropic>=0.40,<1
