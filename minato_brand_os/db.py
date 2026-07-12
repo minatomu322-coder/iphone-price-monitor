@@ -89,6 +89,54 @@ CREATE TABLE IF NOT EXISTS runs (
     ran_at  TEXT NOT NULL,
     detail  TEXT
 );
+
+-- ============ Proof & Personality Engine ============
+
+-- 投稿候補（朝便=proof系 / 夜便=personality系）と投稿履歴
+CREATE TABLE IF NOT EXISTS post_drafts (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at  TEXT NOT NULL,
+    slot        TEXT NOT NULL,               -- morning / night
+    post_type   TEXT NOT NULL,               -- proof / decision / personality / learning
+    title       TEXT,
+    body        TEXT NOT NULL,
+    source      TEXT,                        -- iphone_price / memo / template / claude
+    status      TEXT NOT NULL DEFAULT 'proposed',  -- proposed / posted / skipped
+    posted_at   TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_drafts ON post_drafts(created_at, post_type, status);
+
+-- Personality素材（1行メモ：失敗/学び/実話/考え方）
+CREATE TABLE IF NOT EXISTS memos (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at  TEXT NOT NULL,
+    kind        TEXT NOT NULL,               -- fail / learn / story / thought
+    text        TEXT NOT NULL,
+    used        INTEGER NOT NULL DEFAULT 0
+);
+
+-- 投稿ごとのKPI（Xアナリティクスから手入力。実験モードの主データ）
+CREATE TABLE IF NOT EXISTS post_kpis (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    draft_id      INTEGER NOT NULL REFERENCES post_drafts(id),
+    recorded_at   TEXT NOT NULL,
+    impressions   INTEGER,
+    likes         INTEGER,
+    replies       INTEGER,
+    bookmarks     INTEGER,
+    profile_views INTEGER,
+    follows       INTEGER
+);
+
+-- 日次のアカウント指標（週2回程度の手入力でOK。ブランド分析の主データ）
+CREATE TABLE IF NOT EXISTS daily_metrics (
+    date             TEXT PRIMARY KEY,        -- YYYY-MM-DD
+    followers        INTEGER,
+    profile_views    INTEGER,
+    dms_received     INTEGER,
+    replies_received INTEGER,
+    note             TEXT
+);
 """
 
 

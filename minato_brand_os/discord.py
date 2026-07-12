@@ -56,6 +56,57 @@ def webhook_url() -> str | None:
     return os.environ.get("MBOS_DISCORD_WEBHOOK_URL") or os.environ.get("DISCORD_WEBHOOK_URL")
 
 
+TYPE_LABEL = {"proof": "📊 Proof（実績）", "decision": "🧠 Decision（判断）",
+              "personality": "🫶 Personality（人柄）", "learning": "📝 Learning（学び）"}
+
+
+def _draft_fields(drafts: list[dict[str, Any]]) -> list[dict[str, str]]:
+    fields = []
+    for d in drafts:
+        label = TYPE_LABEL.get(d["post_type"], d["post_type"])
+        fields.append({
+            "name": f"{label} ｜ 候補 #{d['id']}",
+            "value": d["body"][:1000] + f"\n\n`投稿したら: python mbos.py posted --draft {d['id']}`",
+        })
+    return fields
+
+
+def _engage_field(cand: dict[str, Any], n: int = 5) -> dict[str, str]:
+    rows = cand["likes"][:n]
+    value = "\n".join(f"{STAR(r['star'])} {r['name']}  {X_URL.format(r['handle'])}" for r in rows) or "候補なし"
+    return {"name": "📣 投稿後に絡むと伸びる人（いいね/リプ）", "value": value}
+
+
+def notify_morning(drafts: list[dict[str, Any]], cand: dict[str, Any], webhook: str | None = None) -> None:
+    """朝便: Proof候補3件（実データ）＋投稿後の交流先。"""
+    webhook = webhook or webhook_url()
+    fields = _draft_fields(drafts)
+    fields.append(_engage_field(cand))
+    embed = {
+        "title": "🌅 MINATO Brand OS ｜ 朝便（Proof）",
+        "description": "自作システムの実データから生成。→の行を自分の言葉で埋めれば投稿完成。\n"
+                       "**数字は機械が保証する。判断はあなたのブランド。**",
+        "color": 0x10B981,
+        "fields": fields[:25],
+    }
+    _post(webhook, {"embeds": [embed]})
+
+
+def notify_night_personality(drafts: list[dict[str, Any]], cand: dict[str, Any], webhook: str | None = None) -> None:
+    """夜便: Personality候補3件＋投稿後の交流先。"""
+    webhook = webhook or webhook_url()
+    fields = _draft_fields(drafts)
+    fields.append(_engage_field(cand))
+    embed = {
+        "title": "🌃 MINATO Brand OS ｜ 夜便（Personality）",
+        "description": "人柄・失敗・学びの投稿候補。等身大が一番強い。\n"
+                       "素材が切れたら1行メモ: `python mbos.py memo --kind fail --text \"...\"`",
+        "color": 0xEC4899,
+        "fields": fields[:25],
+    }
+    _post(webhook, {"embeds": [embed]})
+
+
 def notify_noon(cand: dict[str, Any], webhook: str | None = None) -> None:
     webhook = webhook or webhook_url()
     likes = cand["likes"]

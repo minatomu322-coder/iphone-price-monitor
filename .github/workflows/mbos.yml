@@ -3,9 +3,11 @@ name: MINATO Brand OS
 on:
   schedule:
     # cronはUTC基準。JSTは+9時間。
+    - cron: "30 21 * * *"  # 06:30 JST 朝便（Proof候補3件）★心臓
     - cron: "0 2 * * *"    # 11:00 JST 毎朝バッチ（収集＋分析）
-    - cron: "0 3 * * *"    # 12:00 JST 便①（今日いいねする100人＋最重要人物）
+    - cron: "0 3 * * *"    # 12:00 JST 便①（今日いいねする候補＋最重要人物）
     - cron: "30 8 * * *"   # 17:30 JST 便②（進捗リマインド＋追加候補）
+    - cron: "30 11 * * *"  # 20:30 JST 夜便（Personality候補3件）★心臓
     - cron: "0 13 * * *"   # 22:00 JST 便③（リプ5-10人＋コピペ文）
   workflow_dispatch:
     inputs:
@@ -13,7 +15,7 @@ on:
         description: 手動実行するアクション
         type: choice
         default: daily
-        options: [daily, noon, evening, night]
+        options: [daily, noon, evening, night, morning-brief, night-brief]
 
 # data/brand_os.sqlite3 を commit で戻すため書き込み権限が必要
 permissions:
@@ -45,11 +47,13 @@ jobs:
           INPUT_ACTION: ${{ github.event.inputs.action }}
         run: |
           case "$SCHEDULE" in
-            "0 2 * * *")  echo "action=daily"   >> "$GITHUB_OUTPUT" ;;
-            "0 3 * * *")  echo "action=noon"    >> "$GITHUB_OUTPUT" ;;
-            "30 8 * * *") echo "action=evening" >> "$GITHUB_OUTPUT" ;;
-            "0 13 * * *") echo "action=night"   >> "$GITHUB_OUTPUT" ;;
-            *)            echo "action=${INPUT_ACTION:-daily}" >> "$GITHUB_OUTPUT" ;;
+            "30 21 * * *") echo "action=morning-brief" >> "$GITHUB_OUTPUT" ;;
+            "0 2 * * *")   echo "action=daily"   >> "$GITHUB_OUTPUT" ;;
+            "0 3 * * *")   echo "action=noon"    >> "$GITHUB_OUTPUT" ;;
+            "30 8 * * *")  echo "action=evening" >> "$GITHUB_OUTPUT" ;;
+            "30 11 * * *") echo "action=night-brief" >> "$GITHUB_OUTPUT" ;;
+            "0 13 * * *")  echo "action=night"   >> "$GITHUB_OUTPUT" ;;
+            *)             echo "action=${INPUT_ACTION:-daily}" >> "$GITHUB_OUTPUT" ;;
           esac
 
       - name: 実行
@@ -61,10 +65,12 @@ jobs:
         run: |
           set -e
           case "${{ steps.pick.outputs.action }}" in
-            daily)   python mbos.py daily ;;
-            noon)    python mbos.py notify --slot noon ;;
-            evening) python mbos.py notify --slot evening ;;
-            night)   python mbos.py notify --slot night ;;
+            daily)         python mbos.py daily ;;
+            noon)          python mbos.py notify --slot noon ;;
+            evening)       python mbos.py notify --slot evening ;;
+            night)         python mbos.py notify --slot night ;;
+            morning-brief) python mbos.py brief --slot morning ;;
+            night-brief)   python mbos.py brief --slot night ;;
           esac
 
       - name: DB変化をコミット

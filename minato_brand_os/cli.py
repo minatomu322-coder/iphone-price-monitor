@@ -15,10 +15,17 @@ import argparse
 from datetime import date
 
 from .agents.analyzer import analyze_all
+from .agents.composer import compose_morning, compose_night
 from .agents.replier import generate_replies
 from .config import load_config
-from .db import BrandDB, now_jst
-from .discord import notify_evening, notify_night, notify_noon
+from .db import BrandDB, jst_iso, now_jst
+from .discord import (
+    notify_evening,
+    notify_morning,
+    notify_night,
+    notify_night_personality,
+    notify_noon,
+)
 from .select import build_candidates
 from . import x_client
 
@@ -87,6 +94,120 @@ def cmd_daily(args) -> None:
     cmd_analyze(args)
 
 
+# ---------------- Proof & Personality Engine ----------------
+
+def cmd_brief(args) -> None:
+    """朝便(Proof3件) / 夜便(Personality3件) を生成してDiscord通知。"""
+    db, cfg = _db(args.config)
+    cand = build_candidates(db, cfg)
+    if args.slot == "morning":
+        drafts = compose_morning(db, cfg)
+        notify_morning(drafts, cand)
+    else:
+        drafts = compose_night(db, cfg)
+        notify_night_personality(drafts, cand)
+    db.log_run("brief", f"slot={args.slot} drafts={len(drafts)}")
+    print(f"{args.slot}便: 候補{len(drafts)}件を通知しました。")
+
+
+def cmd_memo(args) -> None:
+    """Personality素材の1行メモを追加。"""
+    db, _ = _db(args.config)
+    with db.connect() as conn:
+        conn.execute(
+            "INSERT INTO memos (created_at, kind, text) VALUES (?,?,?)",
+            (jst_iso(), args.kind, args.text),
+        )
+    print(f"メモ保存: [{args.kind}] {args.text}")
+
+
+def cmd_posted(args) -> None:
+    """投稿候補を「投稿済み」にする（投稿履歴＝実験データの起点）。"""
+    db, _ = _db(args.config)
+    with db.connect() as conn:
+        row = conn.execute("SELECT id, status FROM post_drafts WHERE id=?", (args.draft,)).fetchone()
+        if not row:
+            print(f"候補 #{args.draft} が見つかりません。")
+            return
+        conn.execute(
+            "UPDATE post_drafts SET status='posted', posted_at=? WHERE id=?",
+            (jst_iso(), args.draft),
+        )
+    print(f"候補 #{args.draft} を投稿済みにしました。KPIは後で: python mbos.py kpi --draft {args.draft} --imp 1000 --likes 5")
+
+
+def cmd_kpi(args) -> None:
+    """投稿のKPIを記録（Xアナリティクスから手入力）。"""
+    db, _ = _db(args.config)
+    with db.connect() as conn:
+        conn.execute(
+            """INSERT INTO post_kpis (draft_id, recorded_at, impressions, likes, replies, bookmarks, profile_views, follows)
+               VALUES (?,?,?,?,?,?,?,?)""",
+            (args.draft, jst_iso(), args.imp, args.likes, args.replies,
+             args.bookmarks, args.views, args.follows),
+        )
+    print(f"KPI記録: draft#{args.draft} imp={args.imp} likes={args.likes}")
+
+
+def cmd_metrics(args) -> None:
+    """日次アカウント指標を記録（週2回でOK）。"""
+    db, _ = _db(args.config)
+    d = args.date or now_jst().date().isoformat()
+    with db.connect() as conn:
+        conn.execute(
+            """INSERT INTO daily_metrics (date, followers, profile_views, dms_received, replies_received, note)
+               VALUES (?,?,?,?,?,?)
+               ON CONFLICT(date) DO UPDATE SET
+                 followers=COALESCE(excluded.followers, followers),
+                 profile_views=COALESCE(excluded.profile_views, profile_views),
+                 dms_received=COALESCE(excluded.dms_received, dms_received),
+                 replies_received=COALESCE(excluded.replies_received, replies_received),
+                 note=COALESCE(excluded.note, note)""",
+            (d, args.followers, args.views, args.dms, args.replies, args.note),
+        )
+    print(f"日次指標を記録: {d}")
+
+
+def cmd_report(args) -> None:
+    """実験レポート: 投稿タイプ別×時間帯別の成績（14日実験の集計）。"""
+    db, _ = _db(args.config)
+    with db.connect() as conn:
+        by_type = conn.execute(
+            """SELECT d.post_type,
+                      COUNT(DISTINCT d.id) posts,
+                      AVG(k.impressions) imp, AVG(k.likes) likes,
+                      AVG(k.replies) reps, AVG(k.profile_views) views, AVG(k.follows) fol
+               FROM post_drafts d JOIN post_kpis k ON k.draft_id=d.id
+               WHERE d.status='posted'
+               GROUP BY d.post_type ORDER BY imp DESC"""
+        ).fetchall()
+        by_hour = conn.execute(
+            """SELECT substr(d.posted_at,12,2) hh, COUNT(*) posts,
+                      AVG(k.impressions) imp, AVG(k.likes) likes
+               FROM post_drafts d JOIN post_kpis k ON k.draft_id=d.id
+               WHERE d.status='posted' AND d.posted_at IS NOT NULL
+               GROUP BY hh ORDER BY imp DESC"""
+        ).fetchall()
+        metrics = conn.execute(
+            "SELECT * FROM daily_metrics ORDER BY date DESC LIMIT 14"
+        ).fetchall()
+
+    print("== 投稿タイプ別（平均） ==")
+    if not by_type:
+        print("  データなし（posted + kpi を記録すると出ます）")
+    for r in by_type:
+        print(f"  {r['post_type']:<12} 投稿{r['posts']}本  imp {r['imp'] or 0:.0f}  "
+              f"like {r['likes'] or 0:.1f}  リプ {r['reps'] or 0:.1f}  "
+              f"プロフ {r['views'] or 0:.1f}  フォロー {r['fol'] or 0:.1f}")
+    print("== 投稿時間帯別（平均） ==")
+    for r in by_hour:
+        print(f"  {r['hh']}時台  投稿{r['posts']}本  imp {r['imp'] or 0:.0f}  like {r['likes'] or 0:.1f}")
+    print("== 直近の日次指標 ==")
+    for r in metrics:
+        print(f"  {r['date']}  フォロワー{r['followers'] or '-'}  プロフ{r['profile_views'] or '-'}  "
+              f"DM{r['dms_received'] or '-'}  被リプ{r['replies_received'] or '-'}")
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="mbos", description="MINATO Brand OS")
     p.add_argument("--config", default=None, help="設定YAMLパス")
@@ -112,6 +233,41 @@ def build_parser() -> argparse.ArgumentParser:
     d = sub.add_parser("daily", help="collect→analyze")
     d.add_argument("--source", default="seed_csv")
     d.set_defaults(func=cmd_daily)
+
+    b = sub.add_parser("brief", help="朝便(Proof)/夜便(Personality)を生成して通知")
+    b.add_argument("--slot", required=True, choices=["morning", "night"])
+    b.set_defaults(func=cmd_brief)
+
+    m = sub.add_parser("memo", help="Personality素材の1行メモ")
+    m.add_argument("--kind", required=True, choices=["fail", "learn", "story", "thought"])
+    m.add_argument("--text", required=True)
+    m.set_defaults(func=cmd_memo)
+
+    po = sub.add_parser("posted", help="投稿候補を投稿済みにする")
+    po.add_argument("--draft", type=int, required=True)
+    po.set_defaults(func=cmd_posted)
+
+    k = sub.add_parser("kpi", help="投稿KPIを記録")
+    k.add_argument("--draft", type=int, required=True)
+    k.add_argument("--imp", type=int, default=None)
+    k.add_argument("--likes", type=int, default=None)
+    k.add_argument("--replies", type=int, default=None)
+    k.add_argument("--bookmarks", type=int, default=None)
+    k.add_argument("--views", type=int, default=None, help="プロフィール閲覧")
+    k.add_argument("--follows", type=int, default=None)
+    k.set_defaults(func=cmd_kpi)
+
+    me = sub.add_parser("metrics", help="日次アカウント指標を記録")
+    me.add_argument("--date", default=None, help="YYYY-MM-DD（省略=今日）")
+    me.add_argument("--followers", type=int, default=None)
+    me.add_argument("--views", type=int, default=None, help="プロフィール閲覧")
+    me.add_argument("--dms", type=int, default=None)
+    me.add_argument("--replies", type=int, default=None, help="受け取ったリプ数")
+    me.add_argument("--note", default=None)
+    me.set_defaults(func=cmd_metrics)
+
+    rp = sub.add_parser("report", help="実験レポート(タイプ別×時間帯別)")
+    rp.set_defaults(func=cmd_report)
     return p
 
 
