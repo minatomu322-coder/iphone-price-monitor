@@ -89,8 +89,20 @@ def cmd_record(args) -> None:
     print(f"記録: @{args.handle} {args.kind} → 親密度 {r['intimacy']}% / 次回 {r['next_recommended_at'][:10]}")
 
 
+def cmd_scout(args) -> None:
+    """Web検索で候補アカウントを自動発掘（要ANTHROPIC_API_KEY）。"""
+    from .agents.scout import scout
+
+    db, cfg = _db(args.config)
+    scout(db, cfg)
+
+
 def cmd_daily(args) -> None:
     cmd_collect(args)
+    from .agents.scout import scout as run_scout
+
+    db, cfg = _db(args.config)
+    run_scout(db, cfg)  # キー無しなら自動スキップ
     cmd_analyze(args)
 
 
@@ -268,6 +280,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     rp = sub.add_parser("report", help="実験レポート(タイプ別×時間帯別)")
     rp.set_defaults(func=cmd_report)
+
+    sc = sub.add_parser("scout", help="Web検索で候補を自動発掘(要ANTHROPIC_API_KEY)")
+    sc.set_defaults(func=cmd_scout)
     return p
 
 
