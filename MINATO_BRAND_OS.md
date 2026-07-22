@@ -62,20 +62,43 @@ python mbos.py metrics --followers 480 --views 120 --dms 1   # 週2回でOK
 python mbos.py report    # タイプ別×時間帯別の成績（14日実験の答え）
 ```
 
-### 週1回やること：候補を足す（収集）
-`data/seeds/` にCSVを1枚置くだけ（GitHubのwebエディタでiPhoneから可）。
-最低 `handle` 列だけあればOK。分かる範囲で他も埋めると採点精度が上がる。
+### 見込み顧客の発掘（Growth Engine）
+
+候補は複数ソースから自動で集まり（収集数に制限なし）、通知は**新規かつ品質条件を満たす候補を最大30人／90日間は同じ人を再通知しない／足りない時は水増しせず不足数と原因を表示**します。
+
+**① 手動巡回（iPhoneだけで完結・毎日の昼便に案内が届く）**
+1. 昼便の「🚶今日の巡回」に参考アカウント3件が表示される（ローテーション）
+2. リンクをタップしてXでリプ欄・引用を眺める
+3. 「この人いいな」と思ったら、GitHubアプリ（またはブラウザ）で
+   `data/seeds/` のCSVを開き、handleを1行追加して Commit（10秒）
 
 ```csv
 handle,name,bio,followers,following,genre,recent_posts,engagement
 poke_taro,ポケカ太郎,ポケカ投資と副業,3200,1800,ポケカ,今日の相場まとめ,3.2
 ```
+最低 `handle` 列だけでOK。翌朝のバッチで自動採点され候補入りします。
 
-### 交流の記録（CRM）
+**② note公式RSS（自動）**
+`config.mbos.yaml` の `growth.sources.note_rss.feeds` に
+`https://note.com/ユーザー名/rss` を追記すると、その書き手が
+note上の見込み顧客として毎日自動収集されます（Xリンク不要）。
+
+**③ 参考アカウント・検索テーマの管理**
+`config.mbos.yaml` の `reference_accounts:`（最大30）と `search_themes:`（30テーマ）
+を編集するだけ。将来のweb_search/YouTube/X APIアダプタもこの設定を使います。
+
+### 交流とKPIイベントの記録（CRM）
 ```bash
-python mbos.py record --handle poke_taro --kind reply   # like/reply/follow/dm/meet
+# 自分の行動
+python mbos.py record --handle poke_taro --kind reply    # like/reply/follow/dm/meet
+# 相手の反応（KPIファネルの材料）
+python mbos.py record --handle poke_taro --kind reply_received  # 返信が来た
+python mbos.py record --handle poke_taro --kind followback      # フォロバされた
+python mbos.py record --handle poke_taro --kind consult         # 相談が来た
+python mbos.py record --handle poke_taro --kind deal --note "コンサル月5万"  # 成約
 ```
-→ 親密度と次回推奨日が自動更新。（将来: Discordの👍リアクションで自動記録に拡張）
+→ 親密度・ステータス・KPIファネル（通知コホートに対する各イベントの独立転換率）が自動更新。
+`python mbos.py dashboard` でファネルを確認。（将来: Discordリアクションで記録に拡張）
 
 ---
 

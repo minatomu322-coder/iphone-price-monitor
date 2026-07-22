@@ -82,6 +82,19 @@ CREATE TABLE IF NOT EXISTS relationships (
     updated_at           TEXT NOT NULL
 );
 
+-- 発見台帳: いつ・どのソースから・どのURLを根拠に候補を見つけたか（重複ヒットも記録）
+CREATE TABLE IF NOT EXISTS discoveries (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id    INTEGER NOT NULL REFERENCES accounts(id),
+    source        TEXT NOT NULL,       -- seed_csv / note_rss / (将来: web_search, youtube, x_api)
+    source_detail TEXT,                -- テーマ・ジャンル等
+    source_url    TEXT,                -- 取得元URL（CEO承認条件5）
+    discovered_at TEXT NOT NULL,
+    is_duplicate  INTEGER NOT NULL DEFAULT 0,
+    evidence      TEXT                 -- クロス媒体統合時の証拠URL（本人明記リンク）
+);
+CREATE INDEX IF NOT EXISTS idx_discovery ON discoveries(discovered_at, source);
+
 -- 実行ログ（監査・デバッグ用）
 CREATE TABLE IF NOT EXISTS runs (
     id      INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -434,6 +447,56 @@ class BrandDB:
             return conn.execute(
                 "SELECT * FROM accounts WHERE substr(last_notified_at,1,10)=?", (today,)
             ).fetchall()
+
+    def add_discovery(self, account_id: int, source: str, source_detail: str | None,
+                      source_url: str | None, is_duplicate: bool, evidence: str | None = None) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                """INSERT INTO discoveries (account_id, source, source_detail, source_url,
+                   discovered_at, is_duplicate, evidence) VALUES (?,?,?,?,?,?,?)""",
+                (account_id, source, source_detail, source_url, jst_iso(),
+                 1 if is_duplicate else 0, evidence),
+            )
+
+    def discovery_stats_today(self) -> dict[str, Any]:
+        """ソース別の本日取得数と重複数（ダッシュボード用）。"""
+        today = now_jst().date().isoformat()
+        with self.connect() as conn:
+            rows = conn.execute(
+                """SELECT source, COUNT(*) total, SUM(is_duplicate) dup
+                   FROM discoveries WHERE substr(discovered_at,1,10)=? GROUP BY source""",
+                (today,),
+            ).fetchall()
+        by_source = {r["source"]: {"total": int(r["total"]), "dup": int(r["dup"] or 0)} for r in rows}
+        return {
+            "by_source": by_source,
+            "found_today": sum(v["total"] for v in by_source.values()),
+            "dup_today": sum(v["dup"] for v in by_source.values()),
+        }
+
+    # KPIファネル: 通知コホートに対する各イベントの独立転換率（CEO承認条件4）
+    # 一本道の到達ステージではなく、イベントごとに独立集計する。
+    FUNNEL_KINDS = ("like", "reply", "reply_received", "follow", "followback",
+                    "dm", "consult", "deal")
+
+    def kpi_funnel(self) -> dict[str, Any]:
+        with self.connect() as conn:
+            candidates = conn.execute("SELECT COUNT(*) c FROM accounts").fetchone()["c"]
+            notified = conn.execute(
+                "SELECT COUNT(*) c FROM accounts WHERE notify_count > 0"
+            ).fetchone()["c"]
+            rows = conn.execute(
+                """SELECT i.kind, COUNT(DISTINCT i.account_id) c
+                   FROM interactions i JOIN accounts a ON a.id = i.account_id
+                   WHERE a.notify_count > 0 GROUP BY i.kind"""
+            ).fetchall()
+        events = {k: 0 for k in self.FUNNEL_KINDS}
+        for r in rows:
+            if r["kind"] in events:
+                events[r["kind"]] = int(r["c"])
+        rates = {k: (v / notified if notified else 0.0) for k, v in events.items()}
+        return {"candidates": int(candidates), "notified": int(notified),
+                "events": events, "rates": rates}
 
     def dashboard_stats(self) -> dict[str, int]:
         """ダッシュボード用の集計（CEO仕様⑤）。通知人数・重複除外は呼び出し側が足す。"""

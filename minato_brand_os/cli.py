@@ -67,8 +67,8 @@ def cmd_notify(args) -> None:
     cand = build_candidates(db, cfg)
     if args.slot == "noon":
         stats = db.dashboard_stats()
-        notify_noon(cand, stats)
-        for c in cand["likes"]:  # 通知した30人を記録（90日ルールの起点）
+        notify_noon(cand, stats, cfg=cfg, disc=db.discovery_stats_today())
+        for c in cand["likes"]:  # 通知した候補を記録（90日ルールの起点）
             db.mark_notified(c["id"])
     elif args.slot == "evening":
         today = [{"star": _star_of(db, r), "name": r["name"] or r["handle"], "handle": r["handle"]}
@@ -87,9 +87,13 @@ def _star_of(db, acc_row) -> int:
     return int(sc["star"]) if sc else 3
 
 
-# 交流種別 → ステータス自動昇格（CEO仕様③。降格なし）
+# 交流種別 → ステータス自動昇格（降格なし）
+# 自分の行動: like/reply(送信)/follow/dm/meet
+# 相手の反応(KPIイベント): reply_received/followback/consult/deal
 KIND_TO_STATUS = {"like": "ENGAGED", "reply": "ENGAGED", "follow": "FOLLOWED",
-                  "dm": "ACTIVE", "meet": "ACTIVE"}
+                  "dm": "ACTIVE", "meet": "ACTIVE",
+                  "reply_received": "ENGAGED", "followback": "FOLLOWED",
+                  "consult": "ACTIVE", "deal": "ACTIVE"}
 
 
 def _find_account(db, handle: str):
@@ -136,15 +140,29 @@ def cmd_dashboard(args) -> None:
     db, cfg = _db(args.config)
     cand = build_candidates(db, cfg)
     stats = db.dashboard_stats()
+    disc = db.discovery_stats_today()
+    funnel = db.kpi_funnel()
     print("== MINATO Brand OS ダッシュボード ==")
-    print(f"新規候補(今日): {stats['new_today']}人")
+    print(f"今日新規発見: {stats['new_today']}人 / 重複ヒット: {disc['dup_today']}件")
+    if disc["by_source"]:
+        print("ソース別: " + " / ".join(f"{k}: {v['total']}件(重複{v['dup']})" for k, v in disc["by_source"].items()))
     print(f"通知可能(次回昼便): {len(cand['likes'])}人（目標30 / 不足 {cand['shortfall']}人）")
-    print(f"重複除外(90日ルール): {cand['excluded_dup']}人")
+    if cand["shortfall"]:
+        print(f"  不足原因: {cand['shortfall_reason']}")
+    print(f"90日除外: {cand['excluded_dup']}人")
     print(f"DB総数: {stats['db_total']}人 / ACTIVE: {stats['active']}人 / ARCHIVED: {stats['archived']}人")
+    print("-- KPIファネル（通知コホートに対する独立転換率） --")
+    print(f"候補 {funnel['candidates']}人 → 通知 {funnel['notified']}人")
+    labels = {"like": "いいね", "reply": "リプ送信", "reply_received": "返信あり",
+              "follow": "フォロー", "followback": "フォロバ", "dm": "DM",
+              "consult": "相談", "deal": "成約"}
+    for kind in db.FUNNEL_KINDS:
+        n, rate = funnel["events"][kind], funnel["rates"][kind]
+        print(f"  {labels[kind]:6}: {n}人 ({rate:.0%})")
 
 
 def cmd_scout(args) -> None:
-    """Web検索で候補アカウントを自動発掘（要ANTHROPIC_API_KEY）。"""
+    """Web検索で候補アカウントを自動発掘（要ANTHROPIC_API_KEY。P1で正式統合予定）。"""
     from .agents.scout import scout
 
     db, cfg = _db(args.config)
@@ -152,11 +170,13 @@ def cmd_scout(args) -> None:
 
 
 def cmd_daily(args) -> None:
-    cmd_collect(args)
-    from .agents.scout import scout as run_scout
+    """毎朝バッチ: Growth Engineパイプライン（発見→正規化→重複排除→保存）→採点。"""
+    from .growth import run_pipeline
 
     db, cfg = _db(args.config)
-    run_scout(db, cfg)  # キー無しなら自動スキップ
+    stats = run_pipeline(db, cfg)
+    print(f"発見: 新規{stats['new']}人 / 重複{stats['duplicate']}件 / 統合{stats['merged']}件"
+          + (f" / ソース障害: {list(stats['source_errors'])}" if stats["source_errors"] else ""))
     cmd_analyze(args)
 
 
@@ -290,10 +310,12 @@ def build_parser() -> argparse.ArgumentParser:
     n.add_argument("--slot", required=True, choices=["noon", "evening", "night"])
     n.set_defaults(func=cmd_notify)
 
-    r = sub.add_parser("record", help="交流を1件記録(CRM)")
+    r = sub.add_parser("record", help="交流/KPIイベントを1件記録(CRM)")
     r.add_argument("--handle", required=True)
-    r.add_argument("--kind", required=True, choices=["like", "reply", "follow", "dm", "meet"])
-    r.add_argument("--note", default="")
+    r.add_argument("--kind", required=True,
+                   choices=["like", "reply", "follow", "dm", "meet",
+                            "reply_received", "followback", "consult", "deal"])
+    r.add_argument("--note", default="", help="メモ（dealは金額等を記録推奨）")
     r.set_defaults(func=cmd_record)
 
     d = sub.add_parser("daily", help="collect→analyze")

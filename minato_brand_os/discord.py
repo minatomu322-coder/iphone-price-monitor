@@ -107,30 +107,60 @@ def notify_night_personality(drafts: list[dict[str, Any]], cand: dict[str, Any],
     _post(webhook, {"embeds": [embed]})
 
 
-def _dashboard_field(cand: dict[str, Any], stats: dict[str, int]) -> dict[str, str]:
-    """CEO仕様⑤: 毎日のダッシュボード。"""
+def _dashboard_field(cand: dict[str, Any], stats: dict[str, int],
+                     disc: dict[str, Any] | None = None) -> dict[str, str]:
+    """毎日のダッシュボード（収集と通知を分離して表示）。"""
     lines = [
-        f"新規候補: {stats['new_today']}人",
+        f"今日新規発見: {stats['new_today']}人 / 重複ヒット: {(disc or {}).get('dup_today', 0)}件",
         f"本日通知: {len(cand['likes'])}人" + (f"（⚠️目標30に {cand['shortfall']}人 不足）" if cand.get("shortfall") else ""),
-        f"重複除外(90日ルール): {cand.get('excluded_dup', 0)}人",
+        f"90日除外: {cand.get('excluded_dup', 0)}人",
         f"DB総数: {stats['db_total']}人 / ACTIVE: {stats['active']}人 / ARCHIVED: {stats['archived']}人",
     ]
+    if disc and disc.get("by_source"):
+        src = " / ".join(f"{k}: {v['total']}件" for k, v in disc["by_source"].items())
+        lines.append(f"ソース別: {src}")
     return {"name": "📊 ダッシュボード", "value": "\n".join(lines)}
 
 
-def notify_noon(cand: dict[str, Any], stats: dict[str, int], webhook: str | None = None) -> None:
+def _patrol_field(cfg: dict[str, Any]) -> dict[str, str] | None:
+    """巡回支援（manual_intake）: 今日見に行く参考アカウントをローテーション表示。
+
+    SourceAdapterではなく人間向けの機能。リプ欄で気になった人のURLを
+    data/seeds/ に貼れば、それが翌日の候補になる。
+    """
+    from datetime import date
+
+    refs = cfg.get("reference_accounts", [])[:30]
+    if not refs:
+        return None
+    n = int(cfg.get("growth", {}).get("patrol_per_day", 3))
+    day = date.today().toordinal()
+    picks = [refs[(day * n + i) % len(refs)] for i in range(min(n, len(refs)))]
+    lines = [f"・@{h} のリプ欄・引用を見る → {X_URL.format(h)}" for h in picks]
+    lines.append("気になった人は data/seeds/ のCSVにhandleを1行追加（iPhoneでOK・10秒）")
+    return {"name": "🚶 今日の巡回（見込み顧客の収穫）", "value": "\n".join(lines)}
+
+
+def notify_noon(cand: dict[str, Any], stats: dict[str, int],
+                cfg: dict[str, Any] | None = None,
+                disc: dict[str, Any] | None = None,
+                webhook: str | None = None) -> None:
     webhook = webhook or webhook_url()
     likes = cand["likes"]
     top = cand["top"]
-    fields = [_dashboard_field(cand, stats)]
+    fields = [_dashboard_field(cand, stats, disc)]
+    if cfg:
+        patrol = _patrol_field(cfg)
+        if patrol:
+            fields.append(patrol)
     if top:
         fields.append({
             "name": "🔥 今日の最重要人物",
             "value": f"{STAR(top['star'])} **{top['name']}**  {X_URL.format(top['handle'])}\n理由: {top['reason']}",
         })
-    desc = "AIが選んだ今日の交流候補（スコア上位・90日重複除外済み）。深く狭く。"
+    desc = "今日の交流候補（新規かつ品質条件を満たす候補を最大30人・水増しなし）。"
     if cand.get("shortfall"):
-        desc += f"\n⚠️ 候補プールが不足しています。シード追加かScout(APIキー)で補充を。"
+        desc += f"\n⚠️ {cand['shortfall']}人不足: {cand.get('shortfall_reason', '')}"
     for idx, part in enumerate(_chunk(_like_lines(likes))):
         fields.append({"name": f"👍 今日いいねする人（{len(likes)}）" if idx == 0 else "　", "value": part or "候補なし"})
     embed = {

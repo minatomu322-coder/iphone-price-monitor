@@ -67,15 +67,83 @@ notify:
   reply_max: 10          # 夜便で提示する「今日リプする人」
   reply_cooldown_days: 7 # 直近この日数でリプ済みの相手はリプ候補から外す
 
+# ============================================================
+# Growth Engine（見込み顧客発掘パイプライン）
+# ============================================================
+growth:
+  # SourceAdapter設定。新媒体は growth/sources/ に1ファイル追加＋ここでenabled
+  sources:
+    seed_csv:
+      enabled: true
+    note_rss:
+      enabled: true
+      # noteの公式RSS（https://note.com/<username>/rss）。見つけたら追記していく
+      feeds: []
+    # 将来(P1/P2): web_search(Claude API) / youtube(Data API) / x_api / instagram / threads
+  # 巡回支援: 毎日の昼便に表示する参考アカウント数（人間がリプ欄を見て収穫する）
+  patrol_per_day: 3
+
+# 参考アカウント（最大30。巡回支援ローテーションと将来の検索アンカーに使用）
+reference_accounts:
+  - chikaneedesu      # ちかねぇ / トレンドせどり ★イチ推し
+  - yoshi_buppan      # よしー / 物販×AI
+  - satoka01          # さとか / メルカリ・スキマ副業
+  - FIRE147020        # こどおじFIRE / 資産形成
+  - pokeca_kauhito    # ポケカを買う人 / ポケカ投資
+  - GV_gura           # グラ / ポケカ高騰予想
+  - Zabi_pokeka       # ザビマル / トレカ投資速報
+  - pokekananika      # ナニカ / トレカ投資
+  - PokeGetInfoMain   # ポケゲトちゃんねる / ポケカ大手(話題の起点)
+  - pokekameshi       # ポケカ飯 / 大会・デッキ大手
+
+# 検索テーマ（30。将来のweb_search/youtubeアダプタの検索クエリ源。追加削除自由）
+search_themes:
+  - ポケカ
+  - ポケモンカード投資
+  - ワンピースカード
+  - 遊戯王
+  - MTG
+  - デュエマ
+  - ドラゴンボールカード
+  - ディズニーカード
+  - せどり
+  - 物販
+  - Amazon物販
+  - 楽天せどり
+  - メルカリ
+  - ラクマ
+  - 副業
+  - AI活用
+  - ChatGPT
+  - Claude
+  - Claude Code
+  - Gemini
+  - Grok
+  - 自動化
+  - Python
+  - プログラミング副業
+  - FIRE
+  - 資産形成
+  - 投資
+  - 会社員副業
+  - フリーランス
+  - 小規模発信者
+
 # CRM（親密度・再交流）
 relationship:
   # 交流種別ごとの親密度加点
+  # 自分の行動: like / reply(リプ送信) / follow / dm / meet
+  # 相手の反応(KPIイベント): reply_received(返信された) / followback / consult(相談) / deal(成約)
   points:
     like: 2
     reply: 6
     follow: 4
     dm: 15
     meet: 30
+    reply_received: 10
+    followback: 8
+    consult: 25
+    deal: 40
   # 1日あたりの親密度自然減衰（放置すると関係が冷める→再交流アラート）
   decay_per_day: 0.7
   # ★ランク別の推奨再交流サイクル（日）。上位ほど短い間隔で接触。

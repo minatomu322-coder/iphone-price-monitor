@@ -47,6 +47,15 @@ def build_candidates(db: BrandDB, cfg: dict[str, Any]) -> dict[str, Any]:
     pool.sort(key=lambda c: (c["star"], c["total"]), reverse=True)
     likes = pool[:daily_count]
     shortfall = max(0, daily_count - len(likes))
+    # 不足時は原因を正直に説明する（水増し・重複・低品質での補充はしない）
+    shortfall_reason = ""
+    if shortfall:
+        total = len(db.all_accounts())
+        parts = [f"DB総数{total}人のうち未通知・通知可能が{len(pool)}人"]
+        if excluded_dup:
+            parts.append(f"90日ルールで{excluded_dup}人除外中")
+        parts.append("→ 対策: シード追加 / note RSS登録 / 巡回支援で収穫 / APIキー投入")
+        shortfall_reason = "。".join(parts)
 
     # --- リプ候補（夜便）: 既に通知済みの相手から。新規人物は夜便で増やさない ---
     reply_pool = []
@@ -76,6 +85,7 @@ def build_candidates(db: BrandDB, cfg: dict[str, Any]) -> dict[str, Any]:
     return {
         "likes": likes,
         "shortfall": shortfall,          # 30人に届かない不足数（水増しせず正直に出す）
+        "shortfall_reason": shortfall_reason,
         "excluded_dup": excluded_dup,    # 90日ルールで除外された人数
         "replies": replies,
         "top": top,
