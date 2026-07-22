@@ -107,38 +107,53 @@ def notify_night_personality(drafts: list[dict[str, Any]], cand: dict[str, Any],
     _post(webhook, {"embeds": [embed]})
 
 
-def notify_noon(cand: dict[str, Any], webhook: str | None = None) -> None:
+def _dashboard_field(cand: dict[str, Any], stats: dict[str, int]) -> dict[str, str]:
+    """CEO仕様⑤: 毎日のダッシュボード。"""
+    lines = [
+        f"新規候補: {stats['new_today']}人",
+        f"本日通知: {len(cand['likes'])}人" + (f"（⚠️目標30に {cand['shortfall']}人 不足）" if cand.get("shortfall") else ""),
+        f"重複除外(90日ルール): {cand.get('excluded_dup', 0)}人",
+        f"DB総数: {stats['db_total']}人 / ACTIVE: {stats['active']}人 / ARCHIVED: {stats['archived']}人",
+    ]
+    return {"name": "📊 ダッシュボード", "value": "\n".join(lines)}
+
+
+def notify_noon(cand: dict[str, Any], stats: dict[str, int], webhook: str | None = None) -> None:
     webhook = webhook or webhook_url()
     likes = cand["likes"]
     top = cand["top"]
-    fields = []
+    fields = [_dashboard_field(cand, stats)]
     if top:
         fields.append({
             "name": "🔥 今日の最重要人物",
             "value": f"{STAR(top['star'])} **{top['name']}**  {X_URL.format(top['handle'])}\n理由: {top['reason']}",
         })
-    # 100人リストは複数fieldに分割
+    desc = "AIが選んだ今日の交流候補（スコア上位・90日重複除外済み）。深く狭く。"
+    if cand.get("shortfall"):
+        desc += f"\n⚠️ 候補プールが不足しています。シード追加かScout(APIキー)で補充を。"
     for idx, part in enumerate(_chunk(_like_lines(likes))):
         fields.append({"name": f"👍 今日いいねする人（{len(likes)}）" if idx == 0 else "　", "value": part or "候補なし"})
     embed = {
         "title": "🌞 MINATO Brand OS ｜ 12:00 便",
-        "description": "AIが選んだ今日の交流候補。深く狭く、数より1本の神リプを。",
+        "description": desc,
         "color": 0xF59E0B,
         "fields": fields[:25],
     }
     _post(webhook, {"embeds": [embed]})
 
 
-def notify_evening(cand: dict[str, Any], progress: dict[str, int], webhook: str | None = None) -> None:
+def notify_evening(today_notified: list[dict[str, Any]], progress: dict[str, int],
+                   cand: dict[str, Any], webhook: str | None = None) -> None:
+    """夕便は「今日すでに通知した30人」の残タスク確認。新規人物は出さない（重複管理の一元化）。"""
     webhook = webhook or webhook_url()
     done = progress.get("like", 0) + progress.get("reply", 0)
-    extra = cand["likes"][: max(0, 20)]
     embed = {
         "title": "🌆 MINATO Brand OS ｜ 17:30 便",
         "description": f"今日の交流：**{done}件**（いいね{progress.get('like',0)} / リプ{progress.get('reply',0)}）\n"
-                       f"夜のリプ({cand['reply_min']}〜{cand['reply_max']}件)に向けて、伸びてる人へ追いいいねを。",
+                       f"昼便の30人のうち、まだ絡めていない人を優先。夜のリプ({cand['reply_min']}〜{cand['reply_max']}件)に備えて。",
         "color": 0x6366F1,
-        "fields": [{"name": "追加で絡むと良い人", "value": _like_lines(extra[:15]) or "なし"}],
+        "fields": [{"name": "今日の通知リスト（再掲・上位15）",
+                    "value": _like_lines(today_notified[:15]) or "本日の通知なし"}],
     }
     _post(webhook, {"embeds": [embed]})
 

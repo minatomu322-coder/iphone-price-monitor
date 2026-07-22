@@ -66,9 +66,15 @@ def cmd_notify(args) -> None:
     db, cfg = _db(args.config)
     cand = build_candidates(db, cfg)
     if args.slot == "noon":
-        notify_noon(cand)
+        stats = db.dashboard_stats()
+        notify_noon(cand, stats)
+        for c in cand["likes"]:  # 通知した30人を記録（90日ルールの起点）
+            db.mark_notified(c["id"])
     elif args.slot == "evening":
-        notify_evening(cand, _today_progress(db))
+        today = [{"star": _star_of(db, r), "name": r["name"] or r["handle"], "handle": r["handle"]}
+                 for r in db.notified_today()]
+        today.sort(key=lambda x: x["star"], reverse=True)
+        notify_evening(today, _today_progress(db), cand)
     elif args.slot == "night":
         replies = {r["id"]: generate_replies(r, cfg) for r in cand["replies"]}
         notify_night(cand, replies)
@@ -76,17 +82,65 @@ def cmd_notify(args) -> None:
     print(f"通知送信: {args.slot}")
 
 
+def _star_of(db, acc_row) -> int:
+    sc = db.latest_scores().get(int(acc_row["id"]))
+    return int(sc["star"]) if sc else 3
+
+
+# 交流種別 → ステータス自動昇格（CEO仕様③。降格なし）
+KIND_TO_STATUS = {"like": "ENGAGED", "reply": "ENGAGED", "follow": "FOLLOWED",
+                  "dm": "ACTIVE", "meet": "ACTIVE"}
+
+
+def _find_account(db, handle: str):
+    with db.connect() as conn:
+        return conn.execute("SELECT id FROM accounts WHERE handle=?", (handle.lstrip("@"),)).fetchone()
+
+
 def cmd_record(args) -> None:
     db, cfg = _db(args.config)
-    with db.connect() as conn:
-        row = conn.execute("SELECT id FROM accounts WHERE handle=?", (args.handle.lstrip("@"),)).fetchone()
+    row = _find_account(db, args.handle)
     if not row:
         print(f"handle '{args.handle}' は未登録です。先に collect してください。")
         return
     db.add_interaction(int(row["id"]), args.kind, note=args.note or "", source="manual")
+    db.promote_status(int(row["id"]), KIND_TO_STATUS[args.kind])
     rel = cfg["relationship"]
     r = db.recompute_relationship(int(row["id"]), rel["points"], rel["decay_per_day"], rel["cadence_days"])
     print(f"記録: @{args.handle} {args.kind} → 親密度 {r['intimacy']}% / 次回 {r['next_recommended_at'][:10]}")
+
+
+def cmd_status(args) -> None:
+    """ステータス手動変更（NOT_INTERESTED/ARCHIVED等）。"""
+    db, _ = _db(args.config)
+    row = _find_account(db, args.handle)
+    if not row:
+        print(f"handle '{args.handle}' は未登録です。")
+        return
+    db.set_status(int(row["id"]), args.set)
+    print(f"@{args.handle} → {args.set}")
+
+
+def cmd_reeval(args) -> None:
+    """CEO再評価指定：90日ルールを解除して次回通知対象へ戻す。"""
+    db, _ = _db(args.config)
+    row = _find_account(db, args.handle)
+    if not row:
+        print(f"handle '{args.handle}' は未登録です。")
+        return
+    db.mark_reevaluate(int(row["id"]))
+    print(f"@{args.handle} を再評価対象にしました（次回昼便で通知可能）。")
+
+
+def cmd_dashboard(args) -> None:
+    db, cfg = _db(args.config)
+    cand = build_candidates(db, cfg)
+    stats = db.dashboard_stats()
+    print("== MINATO Brand OS ダッシュボード ==")
+    print(f"新規候補(今日): {stats['new_today']}人")
+    print(f"通知可能(次回昼便): {len(cand['likes'])}人（目標30 / 不足 {cand['shortfall']}人）")
+    print(f"重複除外(90日ルール): {cand['excluded_dup']}人")
+    print(f"DB総数: {stats['db_total']}人 / ACTIVE: {stats['active']}人 / ARCHIVED: {stats['archived']}人")
 
 
 def cmd_scout(args) -> None:
@@ -283,6 +337,19 @@ def build_parser() -> argparse.ArgumentParser:
 
     sc = sub.add_parser("scout", help="Web検索で候補を自動発掘(要ANTHROPIC_API_KEY)")
     sc.set_defaults(func=cmd_scout)
+
+    st = sub.add_parser("status", help="候補者ステータス変更")
+    st.add_argument("--handle", required=True)
+    st.add_argument("--set", required=True,
+                    choices=["NEW", "DISCOVERED", "ENGAGED", "FOLLOWED", "ACTIVE", "NOT_INTERESTED", "ARCHIVED"])
+    st.set_defaults(func=cmd_status)
+
+    rv = sub.add_parser("reeval", help="CEO再評価指定(90日ルール解除)")
+    rv.add_argument("--handle", required=True)
+    rv.set_defaults(func=cmd_reeval)
+
+    db_ = sub.add_parser("dashboard", help="ダッシュボード表示")
+    db_.set_defaults(func=cmd_dashboard)
     return p
 
 

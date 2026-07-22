@@ -61,12 +61,11 @@ scoring:
 
 # Discord 3便通知
 notify:
-  like_count: 100        # 昼便で提示する「今日いいねする人」
+  daily_count: 30        # 毎日通知する人数（CEO仕様①: スコア上位30人のみ。水増し禁止）
+  renotify_days: 90      # 一度通知した人物の再通知禁止期間（CEO仕様④）
   reply_min: 5
   reply_max: 10          # 夜便で提示する「今日リプする人」
-  # 交流クールダウン：直近この日数で交流済みの相手は候補から外す（薄い連投を防ぐ）
-  like_cooldown_days: 3
-  reply_cooldown_days: 7
+  reply_cooldown_days: 7 # 直近この日数でリプ済みの相手はリプ候補から外す
 
 # CRM（親密度・再交流）
 relationship:

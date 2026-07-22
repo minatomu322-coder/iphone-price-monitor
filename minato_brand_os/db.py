@@ -140,6 +140,22 @@ CREATE TABLE IF NOT EXISTS daily_metrics (
 """
 
 
+# 候補者ステータス（CEO仕様③）。record時に自動昇格、降格はしない。
+STATUSES = ("NEW", "DISCOVERED", "ENGAGED", "FOLLOWED", "ACTIVE", "NOT_INTERESTED", "ARCHIVED")
+STATUS_RANK = {s: i for i, s in enumerate(("NEW", "DISCOVERED", "ENGAGED", "FOLLOWED", "ACTIVE"))}
+
+# 既存DBへ後方互換で列を足す差分マイグレーション（存在すればスキップ）
+MIGRATIONS = [
+    "ALTER TABLE accounts ADD COLUMN url TEXT",
+    "ALTER TABLE accounts ADD COLUMN medium TEXT DEFAULT 'x'",
+    "ALTER TABLE accounts ADD COLUMN status TEXT NOT NULL DEFAULT 'NEW'",
+    "ALTER TABLE accounts ADD COLUMN last_notified_at TEXT",
+    "ALTER TABLE accounts ADD COLUMN notify_count INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE accounts ADD COLUMN reevaluate INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE accounts ADD COLUMN profile_hash TEXT",
+]
+
+
 class BrandDB:
     def __init__(self, path: str | Path) -> None:
         self.path = Path(path)
@@ -160,6 +176,11 @@ class BrandDB:
     def init(self) -> None:
         with self.connect() as conn:
             conn.executescript(SCHEMA)
+            for stmt in MIGRATIONS:
+                try:
+                    conn.execute(stmt)
+                except sqlite3.OperationalError:
+                    pass  # 列が既にある
 
     def log_run(self, kind: str, detail: str = "") -> None:
         with self.connect() as conn:
@@ -189,15 +210,21 @@ class BrandDB:
                     ),
                 )
                 account_id = int(conn.execute("SELECT last_insert_rowid() AS i").fetchone()["i"])
+                conn.execute(
+                    "UPDATE accounts SET url=?, medium=COALESCE(?, medium) WHERE id=?",
+                    (acc.get("url") or f"https://x.com/{acc['handle']}", acc.get("medium"), account_id),
+                )
             else:
                 account_id = int(row["id"])
                 merged = {f: (acc.get(f) if acc.get(f) not in (None, "") else row[f]) for f in fields}
                 conn.execute(
                     """UPDATE accounts SET name=?, bio=?, followers=?, following=?,
-                       genre=?, recent_posts=?, source=?, updated_at=? WHERE id=?""",
+                       genre=?, recent_posts=?, source=?, updated_at=?,
+                       url=COALESCE(?, url), medium=COALESCE(?, medium) WHERE id=?""",
                     (
                         merged["name"], merged["bio"], merged["followers"], merged["following"],
-                        merged["genre"], merged["recent_posts"], merged["source"], now, account_id,
+                        merged["genre"], merged["recent_posts"], merged["source"], now,
+                        acc.get("url"), acc.get("medium"), account_id,
                     ),
                 )
             # スナップショット（数値がある時だけ）
@@ -326,3 +353,102 @@ class BrandDB:
             return conn.execute(
                 "SELECT * FROM relationships WHERE account_id=?", (account_id,)
             ).fetchone()
+
+    # ---------------- ステータス / 通知ローテーション（CEO仕様②③④） ----------------
+
+    @staticmethod
+    def profile_hash(acc: dict[str, Any] | sqlite3.Row) -> str:
+        """プロフィール変更検知用ハッシュ（name/bio/genreが変わると再通知許可）。"""
+        import hashlib
+
+        raw = f"{acc['name']}|{acc['bio']}|{acc['genre']}"
+        return hashlib.sha1(raw.encode("utf-8")).hexdigest()
+
+    def set_status(self, account_id: int, status: str) -> None:
+        if status not in STATUSES:
+            raise ValueError(f"不正なステータス: {status}（{'/'.join(STATUSES)}）")
+        with self.connect() as conn:
+            conn.execute("UPDATE accounts SET status=?, updated_at=? WHERE id=?",
+                         (status, jst_iso(), account_id))
+
+    def promote_status(self, account_id: int, new_status: str) -> None:
+        """交流に応じた自動昇格。降格はしない。NOT_INTERESTED/ARCHIVEDは触らない。"""
+        with self.connect() as conn:
+            row = conn.execute("SELECT status FROM accounts WHERE id=?", (account_id,)).fetchone()
+        if row is None:
+            return
+        cur = row["status"]
+        if cur not in STATUS_RANK or new_status not in STATUS_RANK:
+            return
+        if STATUS_RANK[new_status] > STATUS_RANK[cur]:
+            self.set_status(account_id, new_status)
+
+    def mark_reevaluate(self, account_id: int) -> None:
+        """CEO再評価指定：90日ルールを飛ばして次回通知対象に戻す。"""
+        with self.connect() as conn:
+            conn.execute("UPDATE accounts SET reevaluate=1 WHERE id=?", (account_id,))
+
+    def eligible_for_notification(self, renotify_days: int) -> tuple[list[sqlite3.Row], int]:
+        """通知可能な候補と、90日ルールで除外された人数を返す。
+
+        再通知の解禁条件（CEO仕様④）:
+          未通知 / CEO再評価指定 / プロフィール変更 / 前回通知からrenotify_days経過
+        """
+        now = now_jst()
+        eligible, excluded = [], 0
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM accounts WHERE status NOT IN ('NOT_INTERESTED','ARCHIVED')"
+            ).fetchall()
+        for r in rows:
+            if r["last_notified_at"] is None or r["reevaluate"]:
+                eligible.append(r)
+                continue
+            if r["profile_hash"] and self.profile_hash(r) != r["profile_hash"]:
+                eligible.append(r)
+                continue
+            last = datetime.fromisoformat(r["last_notified_at"])
+            if (now - last).days >= renotify_days:
+                eligible.append(r)
+            else:
+                excluded += 1
+        return eligible, excluded
+
+    def mark_notified(self, account_id: int) -> None:
+        """通知済みに更新：日時・回数・プロフハッシュを記録し、NEWはDISCOVEREDへ。"""
+        with self.connect() as conn:
+            row = conn.execute("SELECT * FROM accounts WHERE id=?", (account_id,)).fetchone()
+            if row is None:
+                return
+            conn.execute(
+                """UPDATE accounts SET last_notified_at=?, notify_count=notify_count+1,
+                   reevaluate=0, profile_hash=?,
+                   status=CASE WHEN status='NEW' THEN 'DISCOVERED' ELSE status END
+                   WHERE id=?""",
+                (jst_iso(), self.profile_hash(row), account_id),
+            )
+
+    def notified_today(self) -> list[sqlite3.Row]:
+        today = now_jst().date().isoformat()
+        with self.connect() as conn:
+            return conn.execute(
+                "SELECT * FROM accounts WHERE substr(last_notified_at,1,10)=?", (today,)
+            ).fetchall()
+
+    def dashboard_stats(self) -> dict[str, int]:
+        """ダッシュボード用の集計（CEO仕様⑤）。通知人数・重複除外は呼び出し側が足す。"""
+        today = now_jst().date().isoformat()
+        with self.connect() as conn:
+            total = conn.execute("SELECT COUNT(*) c FROM accounts").fetchone()["c"]
+            new_today = conn.execute(
+                "SELECT COUNT(*) c FROM accounts WHERE substr(created_at,1,10)=?", (today,)
+            ).fetchone()["c"]
+            by_status = {r["status"]: r["c"] for r in conn.execute(
+                "SELECT status, COUNT(*) c FROM accounts GROUP BY status"
+            ).fetchall()}
+        return {
+            "db_total": int(total),
+            "new_today": int(new_today),
+            "active": int(by_status.get("ACTIVE", 0)),
+            "archived": int(by_status.get("ARCHIVED", 0)),
+        }
