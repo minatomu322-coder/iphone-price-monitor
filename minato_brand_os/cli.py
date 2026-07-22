@@ -66,7 +66,10 @@ def cmd_notify(args) -> None:
     db, cfg = _db(args.config)
     cand = build_candidates(db, cfg)
     if args.slot == "noon":
+        from .growth.advisor import build_advice
+
         stats = db.dashboard_stats()
+        cand["advice"] = build_advice(db, cfg, cand)
         notify_noon(cand, stats, cfg=cfg, disc=db.discovery_stats_today())
         for c in cand["likes"]:  # 通知した候補を記録（90日ルールの起点）
             db.mark_notified(c["id"])
@@ -151,6 +154,19 @@ def cmd_dashboard(args) -> None:
         print(f"  不足原因: {cand['shortfall_reason']}")
     print(f"90日除外: {cand['excluded_dup']}人")
     print(f"DB総数: {stats['db_total']}人 / ACTIVE: {stats['active']}人 / ARCHIVED: {stats['archived']}人")
+    print("-- Source分析（全期間） --")
+    for s in db.source_analysis():
+        print(f"  {s['source']:12} 取得{s['total']}件 / 候補{s['unique']}人 / "
+              f"採用率{s['adoption_rate']:.0%} / 重複率{s['dup_rate']:.0%}")
+    genres = db.genre_counts()
+    if genres:
+        print("-- テーマ別候補数 --")
+        print("  " + " / ".join(f"{g}: {c}人" for g, c in list(genres.items())[:10]))
+    print("-- 改善提案 --")
+    from .growth.advisor import build_advice
+
+    for line in build_advice(db, cfg, cand):
+        print(f"  ・{line}")
     print("-- KPIファネル（通知コホートに対する独立転換率） --")
     print(f"候補 {funnel['candidates']}人 → 通知 {funnel['notified']}人")
     labels = {"like": "いいね", "reply": "リプ送信", "reply_received": "返信あり",

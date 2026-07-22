@@ -77,9 +77,40 @@ growth:
       enabled: true
     note_rss:
       enabled: true
-      # noteの公式RSS（https://note.com/<username>/rss）。見つけたら追記していく
+      # noteの公式RSS。ユーザー: /rss、マガジン: /m/<id>/rss（マガジンは複数の書き手を発掘できる）
+      # ※Web検索で実在確認済み(2026-07)。iPhoneからここに追記するだけで翌朝から収集される
+      feeds:
+        # --- せどり・物販 ---
+        - https://note.com/koukan__note/rss      # 現役物販プレイヤーの交換ノート
+        - https://note.com/sedori_mama/rss       # メルカリせどり主婦るか
+        - https://note.com/sedori_love/rss       # はる@せどりLOVE
+        - https://note.com/pure_quince4695/rss   # 花子/メルカリせどり
+        # --- ポケカ・トレカ ---
+        - https://note.com/y3_toreca/rss         # Y@トレカ
+        - https://note.com/note_games/m/mbb212c7c74b1/rss   # ポケカ記事まとめ(マガジン・複数書き手)
+        # --- AI・副業 ---
+        - https://note.com/ai_freak/rss          # AI FREAK
+        - https://note.com/hiro_seki/rss         # ヒロ/文筆×生成AI
+        - https://note.com/aicolumnwriter/rss    # アトカ@AI副業
+        - https://note.com/totyu/rss             # 東中/note×AI
+        - https://note.com/kurashikilog/rss      # クラシキログ/note収益化
+        # --- 投資・FIRE ---
+        - https://note.com/si_esuai/rss          # FIRE中年si/高配当株
+        - https://note.com/investing_info/rss    # FIRE個人投資家ケイ
+        - https://note.com/notemag_business/m/m943d3b8c8446/rss  # 資産運用まとめ(マガジン・複数書き手)
+        # --- フリーランス・副業ライター ---
+        - https://note.com/yumeno_work_k0/rss    # ゆめの。/フリーランス
+        - https://note.com/mmmiyama/rss          # ミヤマ/note副業
+        - https://note.com/yk_memo/rss           # K/Webライター独立
+    blog_rss:
+      enabled: true
+      # 汎用ブログRSS(はてな/WordPress等の公式フィード)。1フィード=書き手1人
       feeds: []
-    # 将来(P1/P2): web_search(Claude API) / youtube(Data API) / x_api / instagram / threads
+    youtube_rss:
+      enabled: true
+      # YouTube公式チャンネルフィード(APIキー不要): https://www.youtube.com/feeds/videos.xml?channel_id=UCxxxx
+      feeds: []
+    # 将来(P2): web_search(Claude API) / x_api / instagram / threads
   # 巡回支援: 毎日の昼便に表示する参考アカウント数（人間がリプ欄を見て収穫する）
   patrol_per_day: 3
 

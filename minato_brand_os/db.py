@@ -498,6 +498,53 @@ class BrandDB:
         return {"candidates": int(candidates), "notified": int(notified),
                 "events": events, "rates": rates}
 
+    def source_analysis(self) -> list[dict[str, Any]]:
+        """Source別の取得数・採用率(通知到達率)・重複率（全期間）。"""
+        with self.connect() as conn:
+            rows = conn.execute(
+                """SELECT d.source,
+                          COUNT(*) total,
+                          SUM(d.is_duplicate) dup,
+                          COUNT(DISTINCT d.account_id) uniq,
+                          COUNT(DISTINCT CASE WHEN a.notify_count > 0 THEN d.account_id END) adopted
+                   FROM discoveries d JOIN accounts a ON a.id = d.account_id
+                   GROUP BY d.source ORDER BY total DESC"""
+            ).fetchall()
+        out = []
+        for r in rows:
+            total, dup, uniq, adopted = int(r["total"]), int(r["dup"] or 0), int(r["uniq"]), int(r["adopted"])
+            out.append({
+                "source": r["source"], "total": total, "unique": uniq,
+                "adopted": adopted,
+                "adoption_rate": adopted / uniq if uniq else 0.0,
+                "dup_rate": dup / total if total else 0.0,
+            })
+        return out
+
+    def genre_counts(self) -> dict[str, int]:
+        """テーマ(ジャンル)別の候補数。"""
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT COALESCE(genre,'未分類') g, COUNT(*) c FROM accounts GROUP BY g ORDER BY c DESC"
+            ).fetchall()
+        return {r["g"]: int(r["c"]) for r in rows}
+
+    def renotify_unlock_schedule(self, renotify_days: int, horizon_days: int = 14) -> list[tuple[int, int]]:
+        """今後horizon_days日以内の90日ルール解禁予定 [(あとN日, 人数), ...]。"""
+        now = now_jst()
+        buckets: dict[int, int] = {}
+        with self.connect() as conn:
+            rows = conn.execute(
+                """SELECT last_notified_at FROM accounts
+                   WHERE last_notified_at IS NOT NULL
+                     AND status NOT IN ('NOT_INTERESTED','ARCHIVED')"""
+            ).fetchall()
+        for r in rows:
+            unlock_in = renotify_days - (now - datetime.fromisoformat(r["last_notified_at"])).days
+            if 0 < unlock_in <= horizon_days:
+                buckets[unlock_in] = buckets.get(unlock_in, 0) + 1
+        return sorted(buckets.items())
+
     def dashboard_stats(self) -> dict[str, int]:
         """ダッシュボード用の集計（CEO仕様⑤）。通知人数・重複除外は呼び出し側が足す。"""
         today = now_jst().date().isoformat()

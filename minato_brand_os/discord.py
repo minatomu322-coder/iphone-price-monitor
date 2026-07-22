@@ -122,6 +122,10 @@ def _dashboard_field(cand: dict[str, Any], stats: dict[str, int],
     return {"name": "📊 ダッシュボード", "value": "\n".join(lines)}
 
 
+def _advice_field(advice: list[str]) -> dict[str, str]:
+    return {"name": "💡 候補を増やすには", "value": "\n".join(f"・{a}" for a in advice[:6])[:1000]}
+
+
 def _patrol_field(cfg: dict[str, Any]) -> dict[str, str] | None:
     """巡回支援（manual_intake）: 今日見に行く参考アカウントをローテーション表示。
 
@@ -149,6 +153,8 @@ def notify_noon(cand: dict[str, Any], stats: dict[str, int],
     likes = cand["likes"]
     top = cand["top"]
     fields = [_dashboard_field(cand, stats, disc)]
+    if cand.get("advice"):
+        fields.append(_advice_field(cand["advice"]))
     if cfg:
         patrol = _patrol_field(cfg)
         if patrol:
