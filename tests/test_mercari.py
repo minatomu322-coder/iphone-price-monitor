@@ -380,6 +380,76 @@ class Stage2Test(unittest.TestCase):
         self.assertIn("値下げ[提案のみ]", text)
 
 
+class Stage3Test(unittest.TestCase):
+    """商品スコア・リピート判定・特徴分析（優先順位3）"""
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.db = MercariDatabase(Path(self.tmp.name) / "test.sqlite3")
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def _sell(self, name, model, cost, price, purchased, sold, category="トレカ", source="ヤフオク"):
+        item_id = self.db.upsert_item({
+            "name": name, "model_number": model, "category": category,
+            "purchase_price": cost, "purchased_at": purchased,
+            "purchase_source": source, "status": "purchased",
+        })
+        self.db.record_sale({
+            "item_id": item_id, "sold_price": price,
+            "sales_fee": price // 10, "sold_at": sold,
+        })
+        return item_id
+
+    def test_score_sale_grades(self) -> None:
+        from mercari.scoring import score_sale
+
+        # 高ROI・高利益・1週間以内 → S
+        best = score_sale(profit=6000, roi=0.50, days_to_sell=5)
+        self.assertEqual(best["grade"], "S")
+        self.assertEqual(best["points"], 100)
+        # 赤字 → D
+        worst = score_sale(profit=-500, roi=-0.10, days_to_sell=90)
+        self.assertEqual(worst["grade"], "D")
+        # 回転日数不明は中立点
+        neutral = score_sale(profit=2000, roi=0.20, days_to_sell=None)
+        self.assertEqual(neutral["breakdown"]["days"], 10)
+
+    def test_repeat_candidates(self) -> None:
+        from mercari.scoring import repeat_candidates
+
+        # 同じ型番を2回、良い成績で売却 → リピート推奨
+        self._sell("リザードンex", "sv4a-205", 5000, 9000, "2026-06-01", "2026-06-10")
+        self._sell("リザードンex SAR", "SV4A-205", 5200, 9500, "2026-06-15", "2026-06-25")
+        # 赤字商品 → 推奨しない
+        self._sell("赤字商品", None, 8000, 7000, "2026-06-01", "2026-07-20")
+        results = repeat_candidates(self.db, CONFIG)
+        by_key = {r["key"]: r for r in results}
+        charizard = by_key["model:sv4a-205"]  # 型番の大文字小文字は同一視
+        self.assertEqual(charizard["sold_count"], 2)
+        self.assertTrue(charizard["recommend_repeat"])
+        loser = [r for r in results if r["name"] == "赤字商品"][0]
+        self.assertFalse(loser["recommend_repeat"])
+        # 推奨が先頭に来る
+        self.assertTrue(results[0]["recommend_repeat"])
+
+    def test_insights_export(self) -> None:
+        self._sell("商品A", "m-1", 5000, 9000, "2026-06-01", "2026-06-10", category="トレカ")
+        self._sell("商品B", "m-2", 20000, 19000, "2026-06-01", "2026-07-10", category="ゲーム")
+        payload = build_payload(self.db, "insights", CONFIG)
+        text = render(payload, "text")
+        self.assertIn("カテゴリー別", text)
+        self.assertIn("仕入れ価格帯別", text)
+        self.assertIn("スコア分布", text)
+        self.assertIn("リピート", text)
+        self.assertIn("トレカ", text)
+        data = json.loads(render(payload, "json"))
+        self.assertEqual(data["種別"], "insights")
+        self.assertEqual(data["項目"]["総売却件数"], 2)
+        self.assertEqual(data["項目"]["赤字件数"], 1)
+
+
 class ImporterTest(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = tempfile.TemporaryDirectory()

@@ -130,11 +130,15 @@ class MercariHandler(BaseHTTPRequestHandler):
             self.handle_export(parse_qs(parsed.query))
             return
         if parsed.path == "/api/kpi":
+            from mercari.scoring import repeat_candidates
+
             config = load_config()
             db = open_db(config)
             query = parse_qs(parsed.query)
             months = int((query.get("months") or ["6"])[0])
-            self.send_json({"ok": True, "data": kpi_dashboard(db, months=months)})
+            data = kpi_dashboard(db, months=months)
+            data["repeats"] = repeat_candidates(db, config)
+            self.send_json({"ok": True, "data": data})
             return
         self.send_error(HTTPStatus.NOT_FOUND)
 
@@ -513,6 +517,15 @@ INDEX_HTML = r"""<!doctype html>
         <div id="kpiStock" class="hint"></div>
       </div>
       <div class="card">
+        <h2>商品スコアとリピート判定（売却実績から自動評価）</h2>
+        <div class="hint" style="margin-bottom:8px">
+          ROI・利益額・回転日数からS〜Dで採点。全て黒字で平均ROIと回転が基準を満たすと「リピート推奨」になります。
+          <button class="small ghost" id="insightsCopy" style="margin-left:8px">特徴分析データをChatGPT用にコピー</button>
+        </div>
+        <div id="kpiRepeats" class="hint"></div>
+        <pre class="preview" id="insightsPreview" style="display:none"></pre>
+      </div>
+      <div class="card">
         <h2>売れなかった理由（全期間の累計）</h2>
         <div id="kpiReasons" class="hint"></div>
       </div>
@@ -623,7 +636,37 @@ INDEX_HTML = r"""<!doctype html>
       document.getElementById("kpiReasons").innerHTML = d.unsold_reasons.length
         ? d.unsold_reasons.map((r) => `${esc(r.reason_tag)}: ${r.count}件`).join("<br>")
         : "まだ記録がありません";
+      document.getElementById("kpiRepeats").innerHTML = (d.repeats || []).length
+        ? `<table style="width:100%;border-collapse:collapse;font-size:13px">
+            <thead><tr>
+              <th style="text-align:left;padding:6px">商品</th><th style="text-align:right;padding:6px">売却数</th>
+              <th style="text-align:right;padding:6px">合計利益</th><th style="text-align:right;padding:6px">平均ROI</th>
+              <th style="text-align:right;padding:6px">平均回転</th><th style="text-align:center;padding:6px">スコア</th>
+              <th style="text-align:left;padding:6px">判定</th>
+            </tr></thead>
+            <tbody>${d.repeats.map((r) => `<tr style="border-top:1px solid #edf0f4">
+              <td style="padding:6px">${esc(r.name)}${r.model_number ? `（${esc(r.model_number)}）` : ""}</td>
+              <td style="padding:6px;text-align:right">${r.sold_count}件</td>
+              <td style="padding:6px;text-align:right" class="${r.total_profit >= 0 ? "plus" : "minus"}">${fmtYen(r.total_profit)}</td>
+              <td style="padding:6px;text-align:right">${r.avg_roi !== null ? (r.avg_roi * 100).toFixed(1) + "%" : "-"}</td>
+              <td style="padding:6px;text-align:right">${r.avg_days_to_sell !== null ? r.avg_days_to_sell + "日" : "-"}</td>
+              <td style="padding:6px;text-align:center"><strong>${esc(r.grade)}</strong></td>
+              <td style="padding:6px">${r.recommend_repeat ? '<strong class="plus">リピート推奨</strong>' : "-"}</td>
+            </tr>`).join("")}</tbody>
+          </table>`
+        : "売却実績がまだありません";
     }
+
+    document.getElementById("insightsCopy").addEventListener("click", async () => {
+      const fmt = document.getElementById("fmt").value;
+      const res = await fetch(`/api/export?kind=insights&format=${fmt}`);
+      const payload = await res.json();
+      if (!payload.ok) { toast("出力エラー: " + payload.error); return; }
+      const pre = document.getElementById("insightsPreview");
+      pre.style.display = "block";
+      pre.textContent = payload.text;
+      await copyText(payload.text);
+    });
 
     const STATUS_LABELS = {
       candidate: "仕入れ候補", purchased: "仕入れ済み", listed: "出品中",

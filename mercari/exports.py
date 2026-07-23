@@ -37,6 +37,12 @@ PREAMBLES = {
         "値下げしすぎ・仕入れ高すぎの傾向を分析し、増やすべきジャンル・撤退すべきジャンル・翌月の具体的な改善行動を"
         "提案してください。"
     ),
+    "insights": (
+        "以下は全売却実績をスコア化（S〜D）し、カテゴリー・仕入れ先・仕入れ価格帯・販売先別に集計した"
+        "学習用データです。利益が出やすい商品の特徴（ジャンル・価格帯・仕入れ先の組み合わせ）を抽出し、"
+        "「今後の仕入れ基準」として具体的な条件（狙うべき商品像・避けるべき商品像・目安の仕入れ上限）を"
+        "提案してください。リピート推奨リストの妥当性も確認してください。"
+    ),
 }
 
 
@@ -491,6 +497,75 @@ def sales_payload(
     return payload
 
 
+# ---------------------------------------------------------------- 特徴分析（学習）用
+
+
+def insights_payload(db: MercariDatabase, config: dict[str, Any]) -> ExportPayload:
+    from mercari.scoring import profitability_features, repeat_candidates, scored_sales
+
+    sales = scored_sales(db)
+    payload = ExportPayload(
+        kind="insights",
+        title="利益特徴の学習用データ（全期間）",
+        preamble=PREAMBLES["insights"],
+    )
+    total_profit = sum(s["profit"] for s in sales)
+    _f(payload, "総売却件数", len(sales), f"{len(sales)}件")
+    _f(payload, "総利益", total_profit, f"{total_profit:+,}円")
+    _f(payload, "赤字件数", sum(1 for s in sales if s["profit"] < 0),
+       f"{sum(1 for s in sales if s['profit'] < 0)}件")
+
+    features = profitability_features(db)
+    feature_tables = (
+        ("by_category", "カテゴリー別"),
+        ("by_source", "仕入れ先別"),
+        ("by_price_band", "仕入れ価格帯別"),
+        ("by_channel", "販売先別"),
+    )
+    for key, name in feature_tables:
+        rows = features[key]
+        if not rows:
+            continue
+        payload.tables.append({
+            "name": name,
+            "headers": ["区分", "件数", "合計利益", "平均ROI", "平均回転", "赤字率"],
+            "rows": [
+                [
+                    r["label"], f"{r['count']}件", f"{r['total_profit']:+,}円",
+                    fmt_pct(r["avg_roi"]),
+                    f"{r['avg_days']}日" if r["avg_days"] is not None else "-",
+                    fmt_pct(r["loss_rate"]),
+                ]
+                for r in rows
+            ],
+        })
+    if features["grade_distribution"]:
+        payload.tables.append({
+            "name": "スコア分布（S〜D）",
+            "headers": ["スコア", "件数"],
+            "rows": [[g["label"], f"{g['count']}件"] for g in features["grade_distribution"]],
+        })
+    repeats = repeat_candidates(db, config)
+    if repeats:
+        payload.tables.append({
+            "name": "商品別実績とリピート判定",
+            "headers": ["商品", "売却数", "合計利益", "平均ROI", "平均回転", "スコア", "システム判定"],
+            "rows": [
+                [
+                    (r["name"] or "") + (f"（{r['model_number']}）" if r["model_number"] else ""),
+                    f"{r['sold_count']}件",
+                    f"{r['total_profit']:+,}円",
+                    fmt_pct(r["avg_roi"]),
+                    f"{r['avg_days_to_sell']}日" if r["avg_days_to_sell"] is not None else "-",
+                    r["grade"],
+                    "リピート推奨" if r["recommend_repeat"] else "-",
+                ]
+                for r in repeats
+            ],
+        })
+    return payload
+
+
 # ---------------------------------------------------------------- レンダリング
 
 
@@ -591,7 +666,11 @@ def build_payload(
         if not date_from:
             date_from = f"{date_to[:7]}-01"  # デフォルトは当月頭から
         return sales_payload(db, date_from, date_to, config)
-    raise ValueError(f"未対応の出力種別: {kind}（sourcing/listing/stale/salesのいずれか）")
+    if kind == "insights":
+        return insights_payload(db, config)
+    raise ValueError(
+        f"未対応の出力種別: {kind}（sourcing/listing/stale/sales/insightsのいずれか）"
+    )
 
 
 def _require_item(db: MercariDatabase, item_id: int) -> dict[str, Any]:

@@ -20,6 +20,8 @@ thresholds:
   max_active_ratio: 3.0     # 販売中件数÷売り切れ件数 がこれ以上なら供給過多の注意
   stale_days: 14            # 出品からこの日数売れなければ「売れ残り」
   long_stock_days: 30       # 仕入れからこの日数超の在庫を「長期在庫」
+  repeat_min_roi: 0.15      # リピート推奨の最低平均ROI
+  repeat_max_days: 30       # リピート推奨の最大平均回転日数
 
 discord:
   webhook_env: "DISCORD_WEBHOOK_URL"

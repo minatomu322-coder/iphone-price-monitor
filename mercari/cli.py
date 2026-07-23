@@ -101,7 +101,10 @@ def main(argv: list[str] | None = None) -> None:
     p_serve.set_defaults(func=cmd_serve)
 
     p_export = sub.add_parser("export", help="ChatGPT分析用データを出力する")
-    p_export.add_argument("--kind", required=True, choices=("sourcing", "listing", "stale", "sales"))
+    p_export.add_argument(
+        "--kind", required=True,
+        choices=("sourcing", "listing", "stale", "sales", "insights"),
+    )
     p_export.add_argument("--item", type=int, help="対象商品ID（sourcing/listing/stale）")
     p_export.add_argument("--format", default="text", choices=FORMATS)
     p_export.add_argument("--from", dest="date_from", help="集計開始日 YYYY-MM-DD（sales）")
