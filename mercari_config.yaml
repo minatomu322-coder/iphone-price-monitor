@@ -22,6 +22,7 @@ thresholds:
   long_stock_days: 30       # 仕入れからこの日数超の在庫を「長期在庫」
   repeat_min_roi: 0.15      # リピート推奨の最低平均ROI
   repeat_max_days: 30       # リピート推奨の最大平均回転日数
+  judgement_market_move: 0.10  # 見送り判断の答え合わせに使う相場変動率（±10%）
 
 discord:
   webhook_env: "DISCORD_WEBHOOK_URL"

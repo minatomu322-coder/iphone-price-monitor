@@ -19,8 +19,11 @@ FORMATS = ("text", "json", "csv", "markdown")
 PREAMBLES = {
     "sourcing": (
         "以下は仕入れ候補のデータです。同一商品か・状態差・型番違い・セット数・付属品差・"
-        "送料と手数料の妥当性・相場件数・外れ値・偽物リスク・価格下落リスク・回転率・資金拘束を確認し、"
-        "「買い / 条件付きで買い / 見送り / 追加確認が必要」のいずれかを理由付きで返してください。"
+        "送料と手数料の妥当性・相場件数・外れ値・偽物リスク・価格下落リスク・回転率・資金拘束を確認してください。"
+        "「過去のChatGPT判断」と「ChatGPT判断の成績」にはあなた自身の過去の判断と答え合わせ結果が"
+        "含まれています。誤りの傾向（見送りすぎ・強気すぎ等）があれば今回の判断で補正してください。"
+        "回答は必ず①判断（買い / 条件付きで買い / 見送り / 追加確認が必要）②自信度（0〜100%）"
+        "③理由 の3点セットで返してください。"
     ),
     "listing": (
         "以下のデータと（別途送付する）商品画像をもとに、メルカリ出品用の"
@@ -89,7 +92,13 @@ def _f(payload: ExportPayload, label: str, raw: Any, display: str | None = None)
 
 
 def _gpt_history_text(db: MercariDatabase, item_id: int, limit: int = 3) -> str:
-    """過去のChatGPT判断の要約行（新しい順に最大limit件）。"""
+    """過去のChatGPT判断の要約行（新しい順に最大limit件）。
+
+    答え合わせ済みの判断は「→結果→評価」まで含め、
+    ChatGPTが自分の判断精度を振り返れるようにする。
+    """
+    from mercari.judgment import ACCURACY_LABELS
+
     kind_labels = {
         "sourcing": "仕入れ", "listing": "出品", "stale": "売れ残り",
         "monthly": "月次", "reply": "対応文", "other": "その他",
@@ -99,10 +108,17 @@ def _gpt_history_text(db: MercariDatabase, item_id: int, limit: int = 3) -> str:
     for review in reviews:
         parts = [str(review["created_at"])[:10], kind_labels.get(review["kind"], review["kind"])]
         if review.get("verdict"):
-            parts.append(review["verdict"])
+            verdict = review["verdict"]
+            if review.get("confidence") is not None:
+                verdict += f"（自信度{review['confidence']}%）"
+            parts.append(verdict)
         if review.get("summary"):
             parts.append(review["summary"])
-        lines.append(" ".join(parts))
+        line = " ".join(parts)
+        if review.get("accuracy"):
+            label = ACCURACY_LABELS.get(review["accuracy"], review["accuracy"])
+            line += f" →結果: {review.get('outcome') or '記録なし'} →評価: 判断は{label}"
+        lines.append(line)
     return " / ".join(lines)
 
 
@@ -110,6 +126,9 @@ def _gpt_history_text(db: MercariDatabase, item_id: int, limit: int = 3) -> str:
 
 
 def sourcing_payload(db: MercariDatabase, item_id: int, config: dict[str, Any]) -> ExportPayload:
+    from mercari.judgment import auto_evaluate, judgment_stats_text
+
+    auto_evaluate(db, config)  # 出力前に未評価の判断を答え合わせしておく
     item = _require_item(db, item_id)
     market = db.latest_market(item_id)
     history = db.market_history(item_id)
@@ -174,6 +193,8 @@ def sourcing_payload(db: MercariDatabase, item_id: int, config: dict[str, Any]) 
     _f(payload, "注意点", item.get("notes"))
     gpt_history = _gpt_history_text(db, item_id)
     _f(payload, "過去のChatGPT判断", gpt_history or None, gpt_history or "なし")
+    stats_text = judgment_stats_text(db)
+    _f(payload, "ChatGPT判断の成績", stats_text or None, stats_text or "まだ答え合わせ実績なし")
     judgement_text = f"{judgement['label']}：" + "、".join(judgement["reasons"])
     if judgement["warnings"]:
         judgement_text += "／注意：" + "、".join(judgement["warnings"])
@@ -260,6 +281,9 @@ def listing_payload(db: MercariDatabase, item_id: int, config: dict[str, Any]) -
 
 
 def stale_payload(db: MercariDatabase, item_id: int, config: dict[str, Any]) -> ExportPayload:
+    from mercari.judgment import auto_evaluate
+
+    auto_evaluate(db, config)
     item = _require_item(db, item_id)
     listing = db.active_listing(item_id)
     if not listing:

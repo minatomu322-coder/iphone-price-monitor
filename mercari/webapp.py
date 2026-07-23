@@ -35,8 +35,11 @@ def open_db(config: dict[str, Any]) -> MercariDatabase:
 
 
 def state_data() -> dict[str, Any]:
+    from mercari.judgment import auto_evaluate, judgment_stats
+
     config = load_config()
     db = open_db(config)
+    auto_evaluate(db, config)  # 画面を開くたびに未評価の判断を答え合わせする
     fee_rate = float(config.get("fees", {}).get("default_rate", DEFAULT_FEE_RATE))
 
     items = []
@@ -64,7 +67,9 @@ def state_data() -> dict[str, Any]:
         latest_review = db.latest_gpt_verdict(item["id"])
         items.append({
             "gpt_verdict": (
-                {k: latest_review[k] for k in ("created_at", "kind", "verdict", "summary")}
+                {k: latest_review.get(k) for k in
+                 ("id", "created_at", "kind", "verdict", "summary",
+                  "confidence", "outcome", "accuracy")}
                 if latest_review else None
             ),
             "gpt_review_count": len(db.gpt_reviews_for_item(item["id"], limit=100)),
@@ -113,6 +118,7 @@ def state_data() -> dict[str, Any]:
             "month_revenue": month_revenue,
             "month_profit": month_profit,
             "aging": aging,
+            "judgment": judgment_stats(db),
         },
     }
 
@@ -205,6 +211,12 @@ class MercariHandler(BaseHTTPRequestHandler):
             elif path == "/api/gpt-review":
                 review_id = db.add_gpt_review(body)
                 self.send_json({"ok": True, "review_id": review_id})
+            elif path == "/api/review-outcome":
+                db.record_review_outcome(
+                    int(body["review_id"]), str(body.get("outcome") or ""),
+                    str(body["accuracy"]),
+                )
+                self.send_json({"ok": True})
             elif path == "/api/unsold-reason":
                 reason_id = db.add_unsold_reason(body)
                 self.send_json({"ok": True, "reason_id": reason_id})
@@ -467,9 +479,27 @@ INDEX_HTML = r"""<!doctype html>
           <div><label>結論</label><select name="verdict">
             <option value="">なし</option><option>買い</option><option>条件付きで買い</option>
             <option>見送り</option><option>追加確認が必要</option></select></div>
+          <div><label>自信度（0〜100%）</label><input name="confidence" type="number" min="0" max="100" placeholder="例: 80"></div>
           <div class="wide"><label>要点（1〜2行）</label><input name="summary" placeholder="例: 相場は安定。付属品完備なら買い"></div>
           <div class="wide"><label>ChatGPT回答の全文（任意）</label><textarea name="raw_text"></textarea></div>
           <div class="form-actions wide"><button type="submit">保存</button><span class="hint" id="gptFormMsg"></span></div>
+        </form>
+      </div>
+
+      <div class="card">
+        <h2>判断の答え合わせ（手動）</h2>
+        <div class="hint">
+          「買い→売却」「見送り→相場±10%変動」は自動で答え合わせされます。
+          自動評価できないケース（商品一覧のGPT#番号を指定）だけここで記録してください。
+        </div>
+        <form id="outcomeForm" class="form-grid">
+          <div><label>判断ID（GPT#の番号）*</label><input name="review_id" type="number" required></div>
+          <div><label>評価 *</label><select name="accuracy" required>
+            <option value="correct">判断は正しかった</option>
+            <option value="incorrect">判断は誤りだった</option>
+            <option value="partial">部分的に正しかった</option></select></div>
+          <div class="wide"><label>実際の結果</label><input name="outcome" placeholder="例: 3日後に相場が20%上昇"></div>
+          <div class="form-actions wide"><button type="submit">記録</button><span class="hint" id="outcomeFormMsg"></span></div>
         </form>
       </div>
 
@@ -697,7 +727,8 @@ INDEX_HTML = r"""<!doctype html>
       const agingText = (s.aging || []).filter((b) => b.count)
         .map((b) => `${b.label}: ${b.count}件 ${fmtYen(b.capital)}`).join("<br>") || "在庫なし";
       document.getElementById("metrics").innerHTML = `
-        <div class="metric"><div class="metric-label">仕入れ候補</div><div class="metric-value">${s.candidates}件</div></div>
+        <div class="metric"><div class="metric-label">仕入れ候補</div><div class="metric-value">${s.candidates}件</div>
+          <div class="metric-label" style="margin-top:6px">${s.judgment && s.judgment.evaluated ? `GPT判断成績: 正${s.judgment.correct} / 誤${s.judgment.incorrect} / 部分${s.judgment.partial}` : "GPT判断の答え合わせ実績なし"}</div></div>
         <div class="metric"><div class="metric-label">在庫に寝ている資金</div><div class="metric-value">${s.stock_count}点 / ${fmtYen(s.stock_value)}</div>
           <div class="metric-label" style="margin-top:6px">${agingText}</div></div>
         <div class="metric"><div class="metric-label">出品中 / 売れ残り</div><div class="metric-value">${s.listed_count}件 / <span class="${s.stale_count ? "minus" : ""}">${s.stale_count}件</span></div></div>
@@ -717,7 +748,7 @@ INDEX_HTML = r"""<!doctype html>
               <span class="badge">${STATUS_LABELS[item.status] || esc(item.status)}</span>
               ${item.status === "candidate" && j.label ? `<span class="badge ${badgeClass}">一次判定: ${esc(j.label)}</span>` : ""}
               ${item.stale ? `<span class="badge stale">売れ残り ${item.days_listed}日</span>` : ""}
-              ${item.gpt_verdict && item.gpt_verdict.verdict ? `<span class="badge">GPT: ${esc(item.gpt_verdict.verdict)}</span>` : ""}
+              ${item.gpt_verdict && item.gpt_verdict.verdict ? `<span class="badge">GPT#${item.gpt_verdict.id}: ${esc(item.gpt_verdict.verdict)}${item.gpt_verdict.confidence !== null && item.gpt_verdict.confidence !== undefined ? ` ${item.gpt_verdict.confidence}%` : ""}${item.gpt_verdict.accuracy ? (item.gpt_verdict.accuracy === "correct" ? " ✓正解" : item.gpt_verdict.accuracy === "incorrect" ? " ✗誤り" : " △部分的") : ""}</span>` : ""}
               ${item.days_in_stock !== null && item.days_in_stock !== undefined ? `<span class="badge">在庫${item.days_in_stock}日 / ${fmtYen(item.capital)}</span>` : ""}
             </div>
             <div class="copy-actions">
@@ -846,6 +877,10 @@ INDEX_HTML = r"""<!doctype html>
     document.getElementById("unsoldForm").addEventListener("submit", (e) => {
       e.preventDefault();
       postForm(e.target, "/api/unsold-reason", "unsoldFormMsg");
+    });
+    document.getElementById("outcomeForm").addEventListener("submit", (e) => {
+      e.preventDefault();
+      postForm(e.target, "/api/review-outcome", "outcomeFormMsg");
     });
 
     document.getElementById("salesCopy").addEventListener("click", async () => {

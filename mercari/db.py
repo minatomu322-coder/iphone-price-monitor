@@ -193,6 +193,11 @@ class MercariDatabase:
         # 改善のライフサイクル: proposed(提案のみ) -> applied(実施) / rejected(不採用)
         self._ensure_column(conn, "improvements", "status", "TEXT NOT NULL DEFAULT 'applied'")
         self._ensure_column(conn, "improvements", "source", "TEXT NOT NULL DEFAULT 'user'")
+        # 判断の答え合わせ: 自信度(0-100)・実際の結果・正誤評価
+        self._ensure_column(conn, "gpt_reviews", "confidence", "INTEGER")
+        self._ensure_column(conn, "gpt_reviews", "outcome", "TEXT")
+        self._ensure_column(conn, "gpt_reviews", "outcome_at", "TEXT")
+        self._ensure_column(conn, "gpt_reviews", "accuracy", "TEXT")
 
     @staticmethod
     def _ensure_column(conn: sqlite3.Connection, table: str, column: str, ddl_type: str) -> None:
@@ -479,11 +484,14 @@ class MercariDatabase:
         kind = data.get("kind") or "other"
         if kind not in GPT_REVIEW_KINDS:
             raise ValueError(f"不正なkind: {kind}（{'/'.join(GPT_REVIEW_KINDS)}のいずれか）")
+        confidence = _opt_int(data.get("confidence"))
+        if confidence is not None and not 0 <= confidence <= 100:
+            raise ValueError("自信度(confidence)は0〜100で指定してください")
         with self.connect() as conn:
             cur = conn.execute(
                 """
-                INSERT INTO gpt_reviews (item_id, created_at, kind, verdict, summary, raw_text)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO gpt_reviews (item_id, created_at, kind, verdict, summary, raw_text, confidence)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     _opt_int(data.get("item_id")),
@@ -492,9 +500,66 @@ class MercariDatabase:
                     data.get("verdict"),
                     data.get("summary"),
                     data.get("raw_text"),
+                    confidence,
                 ),
             )
             return int(cur.lastrowid)
+
+    def record_review_outcome(
+        self, review_id: int, outcome: str, accuracy: str
+    ) -> None:
+        """判断の答え合わせ（実際の結果と正誤評価）を記録する。"""
+        if accuracy not in ("correct", "incorrect", "partial"):
+            raise ValueError("accuracyはcorrect/incorrect/partialのいずれか")
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT id FROM gpt_reviews WHERE id = ?", (review_id,)
+            ).fetchone()
+            if not row:
+                raise ValueError(f"review {review_id} が見つかりません")
+            conn.execute(
+                "UPDATE gpt_reviews SET outcome = ?, accuracy = ?, outcome_at = ? WHERE id = ?",
+                (outcome, accuracy, now_jst(), review_id),
+            )
+
+    def unevaluated_reviews(self) -> list[dict[str, Any]]:
+        """まだ答え合わせされていない判断（自動評価の対象）。"""
+        with self.connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM gpt_reviews
+                WHERE accuracy IS NULL AND item_id IS NOT NULL AND verdict IS NOT NULL
+                ORDER BY created_at
+                """
+            ).fetchall()
+            return [dict(row) for row in rows]
+
+    def all_reviews(self) -> list[dict[str, Any]]:
+        with self.connect() as conn:
+            rows = conn.execute("SELECT * FROM gpt_reviews ORDER BY created_at").fetchall()
+            return [dict(row) for row in rows]
+
+    def sale_for_item(self, item_id: int) -> dict[str, Any] | None:
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM sales WHERE item_id = ? ORDER BY sold_at DESC LIMIT 1",
+                (item_id,),
+            ).fetchone()
+            return dict(row) if row else None
+
+    def market_at(self, item_id: int, at: str) -> dict[str, Any] | None:
+        """指定日時以前で最新の相場スナップショット（判断当時の相場）。"""
+        with self.connect() as conn:
+            row = conn.execute(
+                """
+                SELECT * FROM market_snapshots
+                WHERE item_id = ? AND captured_at <= ?
+                ORDER BY captured_at DESC, id DESC
+                LIMIT 1
+                """,
+                (item_id, at),
+            ).fetchone()
+            return dict(row) if row else None
 
     def gpt_reviews_for_item(self, item_id: int, limit: int = 10) -> list[dict[str, Any]]:
         with self.connect() as conn:

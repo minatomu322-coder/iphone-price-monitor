@@ -450,6 +450,108 @@ class Stage3Test(unittest.TestCase):
         self.assertEqual(data["項目"]["赤字件数"], 1)
 
 
+class Stage5Test(unittest.TestCase):
+    """判断の答え合わせループ（①自動評価・⑥自信度）"""
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.db = MercariDatabase(Path(self.tmp.name) / "test.sqlite3")
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def test_confidence_validation(self) -> None:
+        item_id = self.db.upsert_item({"name": "テスト"})
+        review_id = self.db.add_gpt_review({
+            "item_id": item_id, "kind": "sourcing", "verdict": "買い", "confidence": 85,
+        })
+        self.assertEqual(self.db.latest_gpt_verdict(item_id)["confidence"], 85)
+        with self.assertRaises(ValueError):
+            self.db.add_gpt_review({"item_id": item_id, "kind": "sourcing", "confidence": 150})
+        # 手動の答え合わせ
+        self.db.record_review_outcome(review_id, "利益+2,000円で売却", "correct")
+        review = self.db.latest_gpt_verdict(item_id)
+        self.assertEqual(review["accuracy"], "correct")
+        self.assertEqual(review["outcome"], "利益+2,000円で売却")
+
+    def test_auto_evaluate_buy_correct(self) -> None:
+        from mercari.judgment import auto_evaluate
+
+        item_id = self.db.upsert_item({
+            "name": "買い正解", "purchase_price": 5000, "purchased_at": "2026-06-01",
+            "status": "purchased",
+        })
+        self.db.add_gpt_review({
+            "item_id": item_id, "kind": "sourcing", "verdict": "買い", "confidence": 80,
+        })
+        self.db.record_sale({
+            "item_id": item_id, "sold_price": 9000, "sales_fee": 900, "sold_at": "2026-06-15",
+        })
+        self.assertEqual(auto_evaluate(self.db, CONFIG), 1)
+        review = self.db.latest_gpt_verdict(item_id)
+        self.assertEqual(review["accuracy"], "correct")
+        self.assertIn("利益+3,100円", review["outcome"])
+        # 再実行しても二重評価しない
+        self.assertEqual(auto_evaluate(self.db, CONFIG), 0)
+
+    def test_auto_evaluate_buy_incorrect_on_loss(self) -> None:
+        from mercari.judgment import auto_evaluate
+
+        item_id = self.db.upsert_item({
+            "name": "買い失敗", "purchase_price": 9000, "status": "purchased",
+        })
+        self.db.add_gpt_review({
+            "item_id": item_id, "kind": "sourcing", "verdict": "条件付きで買い",
+        })
+        self.db.record_sale({
+            "item_id": item_id, "sold_price": 8000, "sales_fee": 800, "sold_at": "2026-07-01",
+        })
+        auto_evaluate(self.db, CONFIG)
+        self.assertEqual(self.db.latest_gpt_verdict(item_id)["accuracy"], "incorrect")
+
+    def test_auto_evaluate_skip_by_market_move(self) -> None:
+        from mercari.judgment import auto_evaluate
+
+        item_id = self.db.upsert_item({"name": "見送り検証", "purchase_price": 5000})
+        self.db.insert_market_snapshot({
+            "item_id": item_id, "median_price": 10000, "captured_at": "2026-06-01T10:00:00+09:00",
+        })
+        self.db.add_gpt_review({
+            "item_id": item_id, "kind": "sourcing", "verdict": "見送り",
+            "created_at": "2026-06-02T10:00:00+09:00",
+        })
+        # まだ新しい相場がない → 評価されない
+        self.assertEqual(auto_evaluate(self.db, CONFIG), 0)
+        # 相場が20%上昇 → 見送りは誤り（機会損失）
+        self.db.insert_market_snapshot({
+            "item_id": item_id, "median_price": 12000, "captured_at": "2026-06-20T10:00:00+09:00",
+        })
+        self.assertEqual(auto_evaluate(self.db, CONFIG), 1)
+        review = self.db.latest_gpt_verdict(item_id)
+        self.assertEqual(review["accuracy"], "incorrect")
+        self.assertIn("+20%上昇", review["outcome"])
+
+    def test_history_and_stats_in_sourcing_export(self) -> None:
+        item_id = self.db.upsert_item({
+            "name": "成績確認", "purchase_price": 5000, "purchased_at": "2026-06-01",
+            "status": "purchased",
+        })
+        self.db.insert_market_snapshot({
+            "item_id": item_id, "median_price": 9000, "sold_count": 10,
+        })
+        self.db.add_gpt_review({
+            "item_id": item_id, "kind": "sourcing", "verdict": "買い", "confidence": 90,
+        })
+        self.db.record_sale({
+            "item_id": item_id, "sold_price": 9000, "sales_fee": 900, "sold_at": "2026-06-10",
+        })
+        text = render(sourcing_payload(self.db, item_id, CONFIG), "text")
+        self.assertIn("自信度90%", text)
+        self.assertIn("→評価: 判断は正しい", text)
+        self.assertIn("ChatGPT判断の成績", text)
+        self.assertIn("自信度70%以上の判断は1件中1件が正解", text)
+
+
 class ImporterTest(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = tempfile.TemporaryDirectory()
