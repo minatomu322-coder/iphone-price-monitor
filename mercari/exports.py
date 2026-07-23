@@ -9,6 +9,7 @@ from typing import Any
 
 from mercari.db import MercariDatabase, today_jst
 from mercari.decision import is_stale, primary_judgement
+from mercari.kpi import inventory_aging, item_capital
 from mercari.profit import DEFAULT_FEE_RATE, breakeven_price, estimate_profit
 
 
@@ -81,6 +82,24 @@ def _f(payload: ExportPayload, label: str, raw: Any, display: str | None = None)
     payload.fields.append((label, raw, display if display is not None else _text(raw)))
 
 
+def _gpt_history_text(db: MercariDatabase, item_id: int, limit: int = 3) -> str:
+    """過去のChatGPT判断の要約行（新しい順に最大limit件）。"""
+    kind_labels = {
+        "sourcing": "仕入れ", "listing": "出品", "stale": "売れ残り",
+        "monthly": "月次", "reply": "対応文", "other": "その他",
+    }
+    reviews = db.gpt_reviews_for_item(item_id, limit=limit)
+    lines = []
+    for review in reviews:
+        parts = [str(review["created_at"])[:10], kind_labels.get(review["kind"], review["kind"])]
+        if review.get("verdict"):
+            parts.append(review["verdict"])
+        if review.get("summary"):
+            parts.append(review["summary"])
+        lines.append(" ".join(parts))
+    return " / ".join(lines)
+
+
 # ---------------------------------------------------------------- 仕入れ判断用
 
 
@@ -147,6 +166,8 @@ def sourcing_payload(db: MercariDatabase, item_id: int, config: dict[str, Any]) 
     )
     _f(payload, "価格履歴", price_history or None, price_history or "履歴なし")
     _f(payload, "注意点", item.get("notes"))
+    gpt_history = _gpt_history_text(db, item_id)
+    _f(payload, "過去のChatGPT判断", gpt_history or None, gpt_history or "なし")
     judgement_text = f"{judgement['label']}：" + "、".join(judgement["reasons"])
     if judgement["warnings"]:
         judgement_text += "／注意：" + "、".join(judgement["warnings"])
@@ -296,6 +317,15 @@ def stale_payload(db: MercariDatabase, item_id: int, config: dict[str, Any]) -> 
         for i in improvements
     )
     _f(payload, "過去に実施した改善", imp_text or None, imp_text or "改善履歴なし")
+    reasons = db.unsold_reasons_for_item(item_id)
+    reason_text = " / ".join(
+        f"{str(r['recorded_at'])[:10]} {r['reason_tag']}"
+        + (f"：{r['detail']}" if r.get("detail") else "")
+        for r in reasons
+    )
+    _f(payload, "記録済みの売れない理由", reason_text or None, reason_text or "未記録")
+    gpt_history = _gpt_history_text(db, item_id)
+    _f(payload, "過去のChatGPT判断", gpt_history or None, gpt_history or "なし")
     stale_flag = is_stale(listing, days, config)
     _f(payload, "システムの売れ残り判定", stale_flag,
        "売れ残り（基準日数超過）" if stale_flag else "基準日数内")
@@ -329,7 +359,10 @@ def sales_payload(
             int(s["sold_price"]) - int(s["sales_fee"])
             - int(s["shipping_cost"]) - int(s["other_cost"]) - cost
         )
-        days_to_sell = _days_between(s.get("purchased_at"), s.get("sold_at"))
+        # 回転日数は売却記録時に保存した値を優先し、旧データは仕入れ日から補完する
+        days_to_sell = s.get("days_to_sell")
+        if days_to_sell is None:
+            days_to_sell = _days_between(s.get("purchased_at"), s.get("sold_at"))
         per_sale.append({**s, "cost": cost, "profit": profit, "days_to_sell": days_to_sell})
     total_profit = sum(s["profit"] for s in per_sale)
     total_cost = sum(s["cost"] for s in per_sale)
@@ -340,10 +373,7 @@ def sales_payload(
 
     # 在庫（未売却）状況
     stock_items = [i for i in db.list_items() if i["status"] in ("purchased", "listed")]
-    stock_value = sum(
-        int(i.get("purchase_price") or 0) + int(i.get("purchase_shipping") or 0)
-        for i in stock_items
-    )
+    stock_value = sum(item_capital(i) for i in stock_items)
     long_stock = [
         i for i in stock_items
         if (_days_between(i.get("purchased_at")) or 0) >= long_stock_days
@@ -382,6 +412,25 @@ def sales_payload(
     group_table("カテゴリー別実績", "category", "カテゴリー")
     group_table("仕入れ先別実績", "purchase_source", "仕入れ先")
     group_table("販売先別実績", "channel", "販売先")
+
+    aging = inventory_aging(stock_items)
+    if stock_items:
+        payload.tables.append({
+            "name": "在庫年齢別の寝ている資金",
+            "headers": ["在庫日数", "件数", "寝ている資金"],
+            "rows": [
+                [b["label"], f"{b['count']}件", fmt_yen(b["capital"])]
+                for b in aging
+            ],
+        })
+
+    reason_stats = db.unsold_reason_stats(date_from, date_to)
+    if reason_stats:
+        payload.tables.append({
+            "name": "売れなかった理由の集計（期間内に記録した分）",
+            "headers": ["理由", "件数"],
+            "rows": [[r["reason_tag"], f"{r['count']}件"] for r in reason_stats],
+        })
 
     if long_stock:
         payload.tables.append({

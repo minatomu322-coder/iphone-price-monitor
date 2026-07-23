@@ -13,6 +13,7 @@ from mercari.db import MercariDatabase, today_jst
 from mercari.decision import is_stale, primary_judgement
 from mercari.exports import build_payload, render, _days_between
 from mercari.importer import import_listing_json
+from mercari.kpi import days_in_stock, inventory_aging, item_capital
 from mercari.profit import DEFAULT_FEE_RATE, estimate_profit
 
 
@@ -60,7 +61,19 @@ def state_data() -> dict[str, Any]:
                 sell_shipping=int(item.get("shipping_cost") or 0),
                 fee_rate=fee_rate,
             ).profit
+        latest_review = db.latest_gpt_verdict(item["id"])
         items.append({
+            "gpt_verdict": (
+                {k: latest_review[k] for k in ("created_at", "kind", "verdict", "summary")}
+                if latest_review else None
+            ),
+            "gpt_review_count": len(db.gpt_reviews_for_item(item["id"], limit=100)),
+            "days_in_stock": (
+                days_in_stock(item) if item["status"] in ("purchased", "listed") else None
+            ),
+            "capital": (
+                item_capital(item) if item["status"] in ("purchased", "listed") else None
+            ),
             **item,
             "market": market,
             "judgement": {k: v for k, v in judgement.items() if k != "ladder"},
@@ -73,9 +86,8 @@ def state_data() -> dict[str, Any]:
         })
 
     stock = [i for i in items if i["status"] in ("purchased", "listed")]
-    stock_value = sum(
-        int(i.get("purchase_price") or 0) + int(i.get("purchase_shipping") or 0) for i in stock
-    )
+    stock_value = sum(item_capital(i) for i in stock)
+    aging = inventory_aging(stock)
     month_start = f"{today_jst()[:7]}-01"
     month_sales = db.sales_between(month_start, today_jst())
     month_revenue = sum(s["sold_price"] for s in month_sales)
@@ -97,6 +109,7 @@ def state_data() -> dict[str, Any]:
             "month_sales_count": len(month_sales),
             "month_revenue": month_revenue,
             "month_profit": month_profit,
+            "aging": aging,
         },
     }
 
@@ -170,6 +183,12 @@ class MercariHandler(BaseHTTPRequestHandler):
             elif path == "/api/improvement":
                 improvement_id = db.add_improvement(body)
                 self.send_json({"ok": True, "improvement_id": improvement_id})
+            elif path == "/api/gpt-review":
+                review_id = db.add_gpt_review(body)
+                self.send_json({"ok": True, "review_id": review_id})
+            elif path == "/api/unsold-reason":
+                reason_id = db.add_unsold_reason(body)
+                self.send_json({"ok": True, "reason_id": reason_id})
             elif path == "/api/import-listing":
                 result = import_listing_json(db, body.get("json") or body)
                 self.send_json({"ok": True, **result})
@@ -414,6 +433,39 @@ INDEX_HTML = r"""<!doctype html>
       </div>
 
       <div class="card">
+        <h2>ChatGPT判断の記録（回答を貼って履歴として残す）</h2>
+        <div class="hint">仕入れレビューや売れ残り分析でChatGPTが出した結論を保存すると、次回の出力に「過去のChatGPT判断」として自動で含まれます。</div>
+        <form id="gptForm" class="form-grid">
+          <div><label>商品 *</label><select name="item_id" class="itemPick" required></select></div>
+          <div><label>種類</label><select name="kind">
+            <option value="sourcing">仕入れレビュー</option><option value="listing">出品文作成</option>
+            <option value="stale">売れ残り分析</option><option value="monthly">月次分析</option>
+            <option value="reply">対応文</option><option value="other">その他</option></select></div>
+          <div><label>結論</label><select name="verdict">
+            <option value="">なし</option><option>買い</option><option>条件付きで買い</option>
+            <option>見送り</option><option>追加確認が必要</option></select></div>
+          <div class="wide"><label>要点（1〜2行）</label><input name="summary" placeholder="例: 相場は安定。付属品完備なら買い"></div>
+          <div class="wide"><label>ChatGPT回答の全文（任意）</label><textarea name="raw_text"></textarea></div>
+          <div class="form-actions wide"><button type="submit">保存</button><span class="hint" id="gptFormMsg"></span></div>
+        </form>
+      </div>
+
+      <div class="card">
+        <h2>売れない理由の記録（ChatGPT分析の結論をタグで蓄積）</h2>
+        <form id="unsoldForm" class="form-grid">
+          <div><label>商品 *</label><select name="item_id" class="itemPick" required></select></div>
+          <div><label>理由タグ</label><select name="reason_tag">
+            <option>価格が高い</option><option>写真が悪い</option><option>タイトルが弱い</option>
+            <option>説明不足</option><option>需要が少ない</option><option>季節外れ</option>
+            <option>相場下落</option><option>供給過多</option><option>状態が悪い</option><option>その他</option></select></div>
+          <div><label>判断した人</label><select name="source">
+            <option value="chatgpt">ChatGPT</option><option value="user">自分</option></select></div>
+          <div class="wide"><label>詳細</label><input name="detail"></div>
+          <div class="form-actions wide"><button type="submit">保存</button><span class="hint" id="unsoldFormMsg"></span></div>
+        </form>
+      </div>
+
+      <div class="card">
         <h2>改善の記録（ChatGPTの提案を実施したら残す）</h2>
         <form id="improveForm" class="form-grid">
           <div><label>商品 *</label><select name="item_id" class="itemPick" required></select></div>
@@ -489,9 +541,12 @@ INDEX_HTML = r"""<!doctype html>
 
     function render() {
       const s = state.summary;
+      const agingText = (s.aging || []).filter((b) => b.count)
+        .map((b) => `${b.label}: ${b.count}件 ${fmtYen(b.capital)}`).join("<br>") || "在庫なし";
       document.getElementById("metrics").innerHTML = `
         <div class="metric"><div class="metric-label">仕入れ候補</div><div class="metric-value">${s.candidates}件</div></div>
-        <div class="metric"><div class="metric-label">在庫 / 未回収金額</div><div class="metric-value">${s.stock_count}点 / ${fmtYen(s.stock_value)}</div></div>
+        <div class="metric"><div class="metric-label">在庫に寝ている資金</div><div class="metric-value">${s.stock_count}点 / ${fmtYen(s.stock_value)}</div>
+          <div class="metric-label" style="margin-top:6px">${agingText}</div></div>
         <div class="metric"><div class="metric-label">出品中 / 売れ残り</div><div class="metric-value">${s.listed_count}件 / <span class="${s.stale_count ? "minus" : ""}">${s.stale_count}件</span></div></div>
         <div class="metric"><div class="metric-label">今月の売上 / 利益</div><div class="metric-value">${fmtYen(s.month_revenue)} / <span class="${s.month_profit >= 0 ? "plus" : "minus"}">${fmtYen(s.month_profit)}</span></div></div>
       `;
@@ -509,6 +564,8 @@ INDEX_HTML = r"""<!doctype html>
               <span class="badge">${STATUS_LABELS[item.status] || esc(item.status)}</span>
               ${item.status === "candidate" && j.label ? `<span class="badge ${badgeClass}">一次判定: ${esc(j.label)}</span>` : ""}
               ${item.stale ? `<span class="badge stale">売れ残り ${item.days_listed}日</span>` : ""}
+              ${item.gpt_verdict && item.gpt_verdict.verdict ? `<span class="badge">GPT: ${esc(item.gpt_verdict.verdict)}</span>` : ""}
+              ${item.days_in_stock !== null && item.days_in_stock !== undefined ? `<span class="badge">在庫${item.days_in_stock}日 / ${fmtYen(item.capital)}</span>` : ""}
             </div>
             <div class="copy-actions">
               <button class="small" onclick="copyExport('sourcing', ${item.id})">仕入れ判断用にコピー</button>
@@ -627,6 +684,14 @@ INDEX_HTML = r"""<!doctype html>
     document.getElementById("improveForm").addEventListener("submit", (e) => {
       e.preventDefault();
       postForm(e.target, "/api/improvement", "improveFormMsg");
+    });
+    document.getElementById("gptForm").addEventListener("submit", (e) => {
+      e.preventDefault();
+      postForm(e.target, "/api/gpt-review", "gptFormMsg");
+    });
+    document.getElementById("unsoldForm").addEventListener("submit", (e) => {
+      e.preventDefault();
+      postForm(e.target, "/api/unsold-reason", "unsoldFormMsg");
     });
 
     document.getElementById("salesCopy").addEventListener("click", async () => {

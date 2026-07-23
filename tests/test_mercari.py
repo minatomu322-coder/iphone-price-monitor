@@ -214,6 +214,104 @@ class ExportTest(unittest.TestCase):
         self.assertIn("トレカ", text)
 
 
+class Stage1Test(unittest.TestCase):
+    """ChatGPT判断履歴・回転日数・在庫資金・売れない理由（優先順位1）"""
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.db = MercariDatabase(Path(self.tmp.name) / "test.sqlite3")
+        self.item_id = self.db.upsert_item({
+            "name": "テスト商品", "purchase_price": 5000, "purchase_shipping": 300,
+            "purchased_at": "2026-06-01", "status": "purchased",
+        })
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def test_gpt_review_roundtrip(self) -> None:
+        self.db.add_gpt_review({
+            "item_id": self.item_id, "kind": "sourcing",
+            "verdict": "条件付きで買い", "summary": "付属品完備なら買い",
+            "raw_text": "全文...",
+        })
+        latest = self.db.latest_gpt_verdict(self.item_id)
+        self.assertEqual(latest["verdict"], "条件付きで買い")
+        with self.assertRaises(ValueError):
+            self.db.add_gpt_review({"item_id": self.item_id, "kind": "不正な種類"})
+
+    def test_gpt_history_in_sourcing_export(self) -> None:
+        self.db.add_gpt_review({
+            "item_id": self.item_id, "kind": "sourcing", "verdict": "買い", "summary": "相場安定",
+        })
+        self.db.insert_market_snapshot({
+            "item_id": self.item_id, "median_price": 9000, "sold_count": 10,
+        })
+        text = render(sourcing_payload(self.db, self.item_id, CONFIG), "text")
+        self.assertIn("過去のChatGPT判断", text)
+        self.assertIn("買い 相場安定", text)
+
+    def test_days_to_sell_recorded(self) -> None:
+        self.db.record_sale({
+            "item_id": self.item_id, "sold_price": 8000, "sales_fee": 800,
+            "sold_at": "2026-06-21",
+        })
+        sales = self.db.sales_between("2026-06-01", "2026-06-30")
+        self.assertEqual(sales[0]["days_to_sell"], 20)
+
+    def test_unsold_reasons_and_stats(self) -> None:
+        self.db.add_unsold_reason({
+            "item_id": self.item_id, "reason_tag": "価格が高い",
+            "detail": "相場より1000円高い", "source": "chatgpt",
+            "recorded_at": "2026-07-01",
+        })
+        self.db.add_unsold_reason({
+            "item_id": self.item_id, "reason_tag": "価格が高い", "recorded_at": "2026-07-02",
+        })
+        self.db.add_unsold_reason({
+            "item_id": self.item_id, "reason_tag": "写真が悪い", "recorded_at": "2026-07-03",
+        })
+        stats = self.db.unsold_reason_stats("2026-07-01", "2026-07-31")
+        self.assertEqual(stats[0]["reason_tag"], "価格が高い")
+        self.assertEqual(stats[0]["count"], 2)
+
+    def test_inventory_aging(self) -> None:
+        from mercari.kpi import inventory_aging, stock_summary
+
+        self.db.upsert_item({
+            "name": "新しい在庫", "purchase_price": 2000, "purchased_at": "2026-07-20",
+            "status": "purchased",
+        })
+        summary = stock_summary(self.db, today="2026-07-23")
+        self.assertEqual(summary["count"], 2)
+        self.assertEqual(summary["capital"], 5300 + 2000)
+        buckets = {b["label"]: b for b in summary["aging"]}
+        self.assertEqual(buckets["0〜30日"]["count"], 1)      # 7/20仕入れ→3日
+        self.assertEqual(buckets["31〜60日"]["count"], 1)     # 6/1仕入れ→52日
+        # 仕入れ日未入力は「日数不明」へ
+        self.db.upsert_item({"name": "日付なし", "purchase_price": 1000, "status": "purchased"})
+        aging = inventory_aging(
+            [i for i in self.db.list_items() if i["status"] == "purchased"], today="2026-07-23"
+        )
+        self.assertTrue(any(b["label"] == "日数不明" and b["count"] == 1 for b in aging))
+
+    def test_sales_export_includes_aging_and_reasons(self) -> None:
+        self.db.add_unsold_reason({
+            "item_id": self.item_id, "reason_tag": "供給過多", "recorded_at": "2026-07-05",
+        })
+        self.db.record_sale({
+            "item_id": self.item_id, "sold_price": 8000, "sales_fee": 800, "sold_at": "2026-07-10",
+        })
+        self.db.upsert_item({
+            "name": "在庫商品", "purchase_price": 3000, "purchased_at": "2026-05-01",
+            "status": "listed",
+        })
+        payload = sales_payload(self.db, "2026-07-01", "2026-07-31", CONFIG)
+        text = render(payload, "text")
+        self.assertIn("在庫年齢別の寝ている資金", text)
+        self.assertIn("売れなかった理由の集計", text)
+        self.assertIn("供給過多", text)
+
+
 class ImporterTest(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = tempfile.TemporaryDirectory()

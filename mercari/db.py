@@ -3,7 +3,7 @@ from __future__ import annotations
 import shutil
 import sqlite3
 from contextlib import contextmanager
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterator
 
@@ -14,6 +14,14 @@ JST = timezone(timedelta(hours=9))
 #                  -> listed(出品中) -> sold(売却済み) / discarded(見送り・処分)
 ITEM_STATUSES = ("candidate", "purchased", "listed", "sold", "discarded")
 LISTING_STATUSES = ("draft", "active", "sold", "cancelled")
+
+# ChatGPT判断履歴の種別
+GPT_REVIEW_KINDS = ("sourcing", "listing", "stale", "monthly", "reply", "other")
+# 売れなかった理由の標準タグ（detailで自由記述も可能）
+UNSOLD_REASON_TAGS = (
+    "価格が高い", "写真が悪い", "タイトルが弱い", "説明不足",
+    "需要が少ない", "季節外れ", "相場下落", "供給過多", "状態が悪い", "その他",
+)
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS items (
@@ -114,6 +122,29 @@ CREATE TABLE IF NOT EXISTS improvements (
     result TEXT
 );
 
+-- ChatGPTの判断履歴（仕入れレビュー・出品文・売れ残り分析などの回答を貼って保存）
+CREATE TABLE IF NOT EXISTS gpt_reviews (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    item_id INTEGER REFERENCES items(id),
+    created_at TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    verdict TEXT,
+    summary TEXT,
+    raw_text TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_gpt_reviews_item ON gpt_reviews(item_id, created_at);
+
+-- 売れなかった理由（ユーザー入力またはChatGPT分析の結論をタグで蓄積し、後で集計する）
+CREATE TABLE IF NOT EXISTS unsold_reasons (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    item_id INTEGER NOT NULL REFERENCES items(id),
+    recorded_at TEXT NOT NULL,
+    reason_tag TEXT NOT NULL,
+    detail TEXT,
+    source TEXT NOT NULL DEFAULT 'user'
+);
+CREATE INDEX IF NOT EXISTS idx_unsold_item ON unsold_reasons(item_id, recorded_at);
+
 -- 将来のOpenAI API連携時に利用料金を記録する（初期MVPでは未使用）
 CREATE TABLE IF NOT EXISTS api_usage (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -154,6 +185,17 @@ class MercariDatabase:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self.connect() as conn:
             conn.executescript(SCHEMA)
+            self._migrate(conn)
+
+    def _migrate(self, conn: sqlite3.Connection) -> None:
+        """既存DBへの後方互換マイグレーション（列追加のみ・破壊的変更はしない）。"""
+        self._ensure_column(conn, "sales", "days_to_sell", "INTEGER")
+
+    @staticmethod
+    def _ensure_column(conn: sqlite3.Connection, table: str, column: str, ddl_type: str) -> None:
+        columns = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
+        if column not in columns:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl_type}")
 
     @contextmanager
     def connect(self) -> Iterator[sqlite3.Connection]:
@@ -382,15 +424,20 @@ class MercariDatabase:
             "other_cost": int(data.get("other_cost") or 0),
             "note": data.get("note"),
         }
+        # 売却までの日数（回転日数）を記録時に確定させる
+        item = self.get_item(record["item_id"])
+        record["days_to_sell"] = _days_diff(
+            (item or {}).get("purchased_at"), record["sold_at"]
+        )
         with self.connect() as conn:
             cur = conn.execute(
                 """
                 INSERT INTO sales (
                     item_id, listing_id, sold_at, channel, sold_price,
-                    sales_fee, shipping_cost, other_cost, note
+                    sales_fee, shipping_cost, other_cost, note, days_to_sell
                 ) VALUES (
                     :item_id, :listing_id, :sold_at, :channel, :sold_price,
-                    :sales_fee, :shipping_cost, :other_cost, :note
+                    :sales_fee, :shipping_cost, :other_cost, :note, :days_to_sell
                 )
                 """,
                 record,
@@ -422,6 +469,89 @@ class MercariDatabase:
                 (date_from, date_to),
             ).fetchall()
             return [dict(row) for row in rows]
+
+    # ---------- ChatGPT判断履歴 ----------
+
+    def add_gpt_review(self, data: dict[str, Any]) -> int:
+        kind = data.get("kind") or "other"
+        if kind not in GPT_REVIEW_KINDS:
+            raise ValueError(f"不正なkind: {kind}（{'/'.join(GPT_REVIEW_KINDS)}のいずれか）")
+        with self.connect() as conn:
+            cur = conn.execute(
+                """
+                INSERT INTO gpt_reviews (item_id, created_at, kind, verdict, summary, raw_text)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    _opt_int(data.get("item_id")),
+                    data.get("created_at") or now_jst(),
+                    kind,
+                    data.get("verdict"),
+                    data.get("summary"),
+                    data.get("raw_text"),
+                ),
+            )
+            return int(cur.lastrowid)
+
+    def gpt_reviews_for_item(self, item_id: int, limit: int = 10) -> list[dict[str, Any]]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM gpt_reviews
+                WHERE item_id = ?
+                ORDER BY created_at DESC, id DESC
+                LIMIT ?
+                """,
+                (item_id, limit),
+            ).fetchall()
+            return [dict(row) for row in rows]
+
+    def latest_gpt_verdict(self, item_id: int) -> dict[str, Any] | None:
+        reviews = self.gpt_reviews_for_item(item_id, limit=1)
+        return reviews[0] if reviews else None
+
+    # ---------- 売れなかった理由 ----------
+
+    def add_unsold_reason(self, data: dict[str, Any]) -> int:
+        with self.connect() as conn:
+            cur = conn.execute(
+                """
+                INSERT INTO unsold_reasons (item_id, recorded_at, reason_tag, detail, source)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    int(data["item_id"]),
+                    data.get("recorded_at") or now_jst(),
+                    data.get("reason_tag") or "その他",
+                    data.get("detail"),
+                    data.get("source") or "user",
+                ),
+            )
+            return int(cur.lastrowid)
+
+    def unsold_reasons_for_item(self, item_id: int) -> list[dict[str, Any]]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM unsold_reasons WHERE item_id = ? ORDER BY recorded_at",
+                (item_id,),
+            ).fetchall()
+            return [dict(row) for row in rows]
+
+    def unsold_reason_stats(
+        self, date_from: str | None = None, date_to: str | None = None
+    ) -> list[dict[str, Any]]:
+        """理由タグごとの件数集計（期間指定は記録日ベース）。"""
+        query = """
+            SELECT reason_tag, COUNT(*) AS count
+            FROM unsold_reasons
+        """
+        params: list[Any] = []
+        if date_from and date_to:
+            query += " WHERE substr(recorded_at, 1, 10) BETWEEN ? AND ?"
+            params = [date_from, date_to]
+        query += " GROUP BY reason_tag ORDER BY count DESC"
+        with self.connect() as conn:
+            return [dict(row) for row in conn.execute(query, params).fetchall()]
 
     # ---------- improvements ----------
 
@@ -465,3 +595,13 @@ def _opt_int(value: Any) -> int | None:
     if value is None or value == "":
         return None
     return int(value)
+
+
+def _days_diff(start: str | None, end: str | None) -> int | None:
+    """日付文字列（ISO/日時どちらでも）同士の日数差。どちらか欠けたらNone。"""
+    if not start or not end:
+        return None
+    try:
+        return (date.fromisoformat(str(end)[:10]) - date.fromisoformat(str(start)[:10])).days
+    except ValueError:
+        return None
