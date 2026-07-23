@@ -136,7 +136,7 @@ class MercariHandler(BaseHTTPRequestHandler):
             self.handle_export(parse_qs(parsed.query))
             return
         if parsed.path == "/api/kpi":
-            from mercari.scoring import repeat_candidates
+            from mercari.scoring import profit_reason_ranking, repeat_candidates
 
             config = load_config()
             db = open_db(config)
@@ -144,6 +144,7 @@ class MercariHandler(BaseHTTPRequestHandler):
             months = int((query.get("months") or ["6"])[0])
             data = kpi_dashboard(db, months=months)
             data["repeats"] = repeat_candidates(db, config)
+            data["profit_reasons"] = profit_reason_ranking(db)
             self.send_json({"ok": True, "data": data})
             return
         self.send_error(HTTPStatus.NOT_FOUND)
@@ -219,6 +220,9 @@ class MercariHandler(BaseHTTPRequestHandler):
                 self.send_json({"ok": True})
             elif path == "/api/unsold-reason":
                 reason_id = db.add_unsold_reason(body)
+                self.send_json({"ok": True, "reason_id": reason_id})
+            elif path == "/api/profit-reason":
+                reason_id = db.add_profit_reason(body)
                 self.send_json({"ok": True, "reason_id": reason_id})
             elif path == "/api/import-listing":
                 result = import_listing_json(db, body.get("json") or body)
@@ -519,6 +523,23 @@ INDEX_HTML = r"""<!doctype html>
       </div>
 
       <div class="card">
+        <h2>利益になった理由の記録（売れたら勝ち要因をタグで残す）</h2>
+        <div class="hint">記録が溜まると「利益理由ランキング」として集計され、今後の仕入れ基準としてChatGPTへ渡ります。</div>
+        <form id="profitReasonForm" class="form-grid">
+          <div><label>商品 *</label><select name="item_id" class="itemPick" required></select></div>
+          <div><label>理由タグ</label><select name="reason_tag">
+            <option>相場より安く仕入れた</option><option>発売直後・新作</option><option>人気シリーズ</option>
+            <option>状態が良い</option><option>付属品完備</option><option>低価格帯で回転が速い</option>
+            <option>仕入れ先が良い</option><option>季節需要</option><option>セット販売</option>
+            <option>検索されやすい出品文</option><option>その他</option></select></div>
+          <div><label>判断した人</label><select name="source">
+            <option value="chatgpt">ChatGPT</option><option value="user">自分</option></select></div>
+          <div class="wide"><label>詳細</label><input name="detail"></div>
+          <div class="form-actions wide"><button type="submit">保存</button><span class="hint" id="profitReasonFormMsg"></span></div>
+        </form>
+      </div>
+
+      <div class="card">
         <h2>改善の記録（ChatGPTの提案と実施結果を残す）</h2>
         <form id="improveForm" class="form-grid">
           <div><label>商品 *</label><select name="item_id" class="itemPick" required></select></div>
@@ -561,6 +582,10 @@ INDEX_HTML = r"""<!doctype html>
         </div>
         <div id="kpiRepeats" class="hint"></div>
         <pre class="preview" id="insightsPreview" style="display:none"></pre>
+      </div>
+      <div class="card">
+        <h2>利益理由ランキング（なぜ利益になったか）</h2>
+        <div id="kpiProfitReasons" class="hint"></div>
       </div>
       <div class="card">
         <h2>売れなかった理由（全期間の累計）</h2>
@@ -699,6 +724,12 @@ INDEX_HTML = r"""<!doctype html>
       document.getElementById("kpiReasons").innerHTML = d.unsold_reasons.length
         ? d.unsold_reasons.map((r) => `${esc(r.reason_tag)}: ${r.count}件`).join("<br>")
         : "まだ記録がありません";
+      document.getElementById("kpiProfitReasons").innerHTML = (d.profit_reasons || []).length
+        ? d.profit_reasons.map((r, i) =>
+            `${i + 1}. <strong>${esc(r.reason_tag)}</strong>（${r.count}回 / 実利益 ${fmtYen(r.total_profit)}`
+            + `${r.avg_roi !== null ? ` / 平均ROI ${(r.avg_roi * 100).toFixed(1)}%` : ""}`
+            + `${r.avg_days !== null ? ` / 平均回転 ${r.avg_days}日` : ""}）`).join("<br>")
+        : "まだ記録がありません。売れたら「利益になった理由」を記録してください";
       document.getElementById("kpiRepeats").innerHTML = (d.repeats || []).length
         ? `<table style="width:100%;border-collapse:collapse;font-size:13px">
             <thead><tr>
@@ -895,6 +926,10 @@ INDEX_HTML = r"""<!doctype html>
     document.getElementById("outcomeForm").addEventListener("submit", (e) => {
       e.preventDefault();
       postForm(e.target, "/api/review-outcome", "outcomeFormMsg");
+    });
+    document.getElementById("profitReasonForm").addEventListener("submit", (e) => {
+      e.preventDefault();
+      postForm(e.target, "/api/profit-reason", "profitReasonFormMsg");
     });
 
     document.getElementById("salesCopy").addEventListener("click", async () => {

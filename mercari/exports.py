@@ -31,20 +31,25 @@ PREAMBLES = {
         "作成してください。画像やデータで確認できない内容（美品・未使用・正規品など）は書かないでください。"
     ),
     "stale": (
-        "以下は売れ残っている出品のデータです。値下げだけでなく、まず売れない理由を分析し、"
-        "タイトル・説明文・1枚目写真・追加撮影・価格・セット/バラ売り・他販路・カテゴリー・検索キーワード・"
-        "損切りor保有継続の観点で改善案を出してください。"
+        "以下は売れ残っている出品のデータです。値下げだけでなく、まず売れない理由を分析してください。"
+        "そのうえで改善案を必ず3つ出してください。各案には①具体的な実施内容"
+        "②期待利益（円）③期待ROI ④期待回転改善（何日短縮できそうか）の見積もりを付けてください。"
+        "観点: タイトル・説明文・1枚目写真・追加撮影・価格・セット/バラ売り・他販路・カテゴリー・"
+        "検索キーワード・損切りor保有継続。"
     ),
     "sales": (
-        "以下は販売実績の集計データです。利益が出ているカテゴリー/仕入れ先、赤字や資金効率の悪い在庫、"
-        "値下げしすぎ・仕入れ高すぎの傾向を分析し、増やすべきジャンル・撤退すべきジャンル・翌月の具体的な改善行動を"
-        "提案してください。"
+        "以下は販売実績の集計データです。利益が出ているカテゴリー/仕入れ先、赤字・機会損失・失敗率、"
+        "値下げしすぎ・仕入れ高すぎの傾向を分析してください。そのうえで翌月の改善案を必ず3つ出してください。"
+        "各案には①具体的な行動 ②期待利益（円）③期待ROI ④期待回転改善（日数）の見積もりを付けてください。"
+        "増やすべきジャンル・撤退すべきジャンルも明示してください。"
     ),
     "insights": (
-        "以下は全売却実績をスコア化（S〜D）し、カテゴリー・仕入れ先・仕入れ価格帯・販売先別に集計した"
-        "学習用データです。利益が出やすい商品の特徴（ジャンル・価格帯・仕入れ先の組み合わせ）を抽出し、"
+        "以下は全売却実績をスコア化（S〜D、資金拘束ペナルティ込み）し、カテゴリー・仕入れ先・"
+        "仕入れ価格帯・販売先別と「利益になった理由ランキング」で集計した学習用データです。"
+        "利益が出やすい商品の特徴（ジャンル・価格帯・仕入れ先・勝ち要因の組み合わせ）を抽出し、"
         "「今後の仕入れ基準」として具体的な条件（狙うべき商品像・避けるべき商品像・目安の仕入れ上限）を"
-        "提案してください。リピート推奨リストの妥当性も確認してください。"
+        "提案してください。さらに改善案を必ず3つ出し、各案に①具体的な行動 ②期待利益（円）"
+        "③期待ROI ④期待回転改善（日数）の見積もりを付けてください。リピート推奨リストの妥当性も確認してください。"
     ),
 }
 
@@ -475,6 +480,10 @@ def sales_payload(
             "rows": [[r["reason_tag"], f"{r['count']}件"] for r in reason_stats],
         })
 
+    profit_reason_table = _profit_reason_table(db)
+    if profit_reason_table:
+        payload.tables.append(profit_reason_table)
+
     if long_stock:
         payload.tables.append({
             "name": f"長期在庫（仕入れから{long_stock_days}日以上）",
@@ -534,6 +543,26 @@ def sales_payload(
 # ---------------------------------------------------------------- 特徴分析（学習）用
 
 
+def _profit_reason_table(db: MercariDatabase) -> dict[str, Any] | None:
+    from mercari.scoring import profit_reason_ranking
+
+    ranking = profit_reason_ranking(db)
+    if not ranking:
+        return None
+    return {
+        "name": "利益になった理由ランキング（全期間・今後の仕入れ基準）",
+        "headers": ["理由", "記録回数", "対象商品の実利益", "平均ROI", "平均回転"],
+        "rows": [
+            [
+                r["reason_tag"], f"{r['count']}回", f"{r['total_profit']:+,}円",
+                fmt_pct(r["avg_roi"]),
+                f"{r['avg_days']}日" if r["avg_days"] is not None else "-",
+            ]
+            for r in ranking
+        ],
+    }
+
+
 def insights_payload(db: MercariDatabase, config: dict[str, Any]) -> ExportPayload:
     from mercari.scoring import profitability_features, repeat_candidates, scored_sales
 
@@ -579,6 +608,9 @@ def insights_payload(db: MercariDatabase, config: dict[str, Any]) -> ExportPaylo
             "headers": ["スコア", "件数"],
             "rows": [[g["label"], f"{g['count']}件"] for g in features["grade_distribution"]],
         })
+    reason_table = _profit_reason_table(db)
+    if reason_table:
+        payload.tables.append(reason_table)
     repeats = repeat_candidates(db, config)
     if repeats:
         payload.tables.append({

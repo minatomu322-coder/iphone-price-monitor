@@ -631,6 +631,66 @@ class Stage6Test(unittest.TestCase):
         self.assertIn("100.0%", text)  # 1件中1件赤字
 
 
+class Stage7Test(unittest.TestCase):
+    """利益理由ランキング（③）と改善案必須の依頼文（④）"""
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.db = MercariDatabase(Path(self.tmp.name) / "test.sqlite3")
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def test_profit_reason_ranking(self) -> None:
+        from mercari.scoring import profit_reason_ranking
+
+        for i, (price, tag) in enumerate((
+            (9000, "発売直後・新作"), (12000, "発売直後・新作"), (7000, "仕入れ先が良い"),
+        )):
+            item_id = self.db.upsert_item({
+                "name": f"商品{i}", "purchase_price": 5000,
+                "purchased_at": "2026-06-01", "status": "purchased",
+            })
+            self.db.record_sale({
+                "item_id": item_id, "sold_price": price,
+                "sales_fee": price // 10, "sold_at": "2026-06-10",
+            })
+            self.db.add_profit_reason({
+                "item_id": item_id, "reason_tag": tag, "source": "chatgpt",
+            })
+        ranking = profit_reason_ranking(self.db)
+        self.assertEqual(ranking[0]["reason_tag"], "発売直後・新作")
+        self.assertEqual(ranking[0]["count"], 2)
+        # (9000-900-5000) + (12000-1200-5000) = 3100 + 5800
+        self.assertEqual(ranking[0]["total_profit"], 8900)
+        self.assertEqual(ranking[0]["avg_days"], 9.0)
+        self.assertEqual(ranking[1]["reason_tag"], "仕入れ先が良い")
+
+    def test_ranking_in_insights_and_sales_exports(self) -> None:
+        item_id = self.db.upsert_item({
+            "name": "勝ち商品", "purchase_price": 5000,
+            "purchased_at": "2026-06-01", "status": "purchased",
+        })
+        self.db.record_sale({
+            "item_id": item_id, "sold_price": 9000, "sales_fee": 900, "sold_at": "2026-07-05",
+        })
+        self.db.add_profit_reason({"item_id": item_id, "reason_tag": "人気シリーズ"})
+        insights_text = render(build_payload(self.db, "insights", CONFIG), "text")
+        self.assertIn("利益になった理由ランキング", insights_text)
+        self.assertIn("人気シリーズ", insights_text)
+        sales_text = render(sales_payload(self.db, "2026-07-01", "2026-07-31", CONFIG), "text")
+        self.assertIn("利益になった理由ランキング", sales_text)
+
+    def test_preambles_demand_three_proposals(self) -> None:
+        from mercari.exports import PREAMBLES
+
+        for kind in ("stale", "sales", "insights"):
+            self.assertIn("必ず3つ", PREAMBLES[kind])
+            self.assertIn("期待利益", PREAMBLES[kind])
+            self.assertIn("期待ROI", PREAMBLES[kind])
+            self.assertIn("期待回転", PREAMBLES[kind])
+
+
 class ImporterTest(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = tempfile.TemporaryDirectory()

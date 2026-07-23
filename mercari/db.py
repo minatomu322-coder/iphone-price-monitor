@@ -22,6 +22,12 @@ UNSOLD_REASON_TAGS = (
     "価格が高い", "写真が悪い", "タイトルが弱い", "説明不足",
     "需要が少ない", "季節外れ", "相場下落", "供給過多", "状態が悪い", "その他",
 )
+# 利益になった理由の標準タグ（今後の仕入れ基準の学習に使う）
+PROFIT_REASON_TAGS = (
+    "相場より安く仕入れた", "発売直後・新作", "人気シリーズ", "状態が良い",
+    "付属品完備", "低価格帯で回転が速い", "仕入れ先が良い", "季節需要",
+    "セット販売", "検索されやすい出品文", "その他",
+)
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS items (
@@ -144,6 +150,17 @@ CREATE TABLE IF NOT EXISTS unsold_reasons (
     source TEXT NOT NULL DEFAULT 'user'
 );
 CREATE INDEX IF NOT EXISTS idx_unsold_item ON unsold_reasons(item_id, recorded_at);
+
+-- 利益になった理由（売れた商品の勝ち要因をタグで蓄積し、仕入れ基準の学習に使う）
+CREATE TABLE IF NOT EXISTS profit_reasons (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    item_id INTEGER NOT NULL REFERENCES items(id),
+    recorded_at TEXT NOT NULL,
+    reason_tag TEXT NOT NULL,
+    detail TEXT,
+    source TEXT NOT NULL DEFAULT 'user'
+);
+CREATE INDEX IF NOT EXISTS idx_profit_reason_item ON profit_reasons(item_id, recorded_at);
 
 -- 将来のOpenAI API連携時に利用料金を記録する（初期MVPでは未使用）
 CREATE TABLE IF NOT EXISTS api_usage (
@@ -620,6 +637,38 @@ class MercariDatabase:
         query += " GROUP BY reason_tag ORDER BY count DESC"
         with self.connect() as conn:
             return [dict(row) for row in conn.execute(query, params).fetchall()]
+
+    # ---------- 利益になった理由 ----------
+
+    def add_profit_reason(self, data: dict[str, Any]) -> int:
+        with self.connect() as conn:
+            cur = conn.execute(
+                """
+                INSERT INTO profit_reasons (item_id, recorded_at, reason_tag, detail, source)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    int(data["item_id"]),
+                    data.get("recorded_at") or now_jst(),
+                    data.get("reason_tag") or "その他",
+                    data.get("detail"),
+                    data.get("source") or "user",
+                ),
+            )
+            return int(cur.lastrowid)
+
+    def profit_reasons_for_item(self, item_id: int) -> list[dict[str, Any]]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM profit_reasons WHERE item_id = ? ORDER BY recorded_at",
+                (item_id,),
+            ).fetchall()
+            return [dict(row) for row in rows]
+
+    def all_profit_reasons(self) -> list[dict[str, Any]]:
+        with self.connect() as conn:
+            rows = conn.execute("SELECT * FROM profit_reasons ORDER BY recorded_at").fetchall()
+            return [dict(row) for row in rows]
 
     # ---------- improvements ----------
 

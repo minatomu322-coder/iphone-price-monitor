@@ -218,6 +218,38 @@ def profitability_features(db: MercariDatabase) -> dict[str, list[dict[str, Any]
     }
 
 
+def profit_reason_ranking(db: MercariDatabase) -> list[dict[str, Any]]:
+    """利益理由ランキング。記録されたタグごとに、対象商品の実利益・平均ROI・平均回転を集計する。
+
+    「なぜ利益になったか」を件数と実績額の両面でランキング化し、
+    今後の仕入れ基準としてChatGPTへ渡す。
+    """
+    sales_by_item: dict[int, dict[str, Any]] = {}
+    for s in scored_sales(db):
+        sales_by_item.setdefault(int(s["item_id"]), s)  # 商品ごとに最新の売却1件
+
+    groups: dict[str, dict[str, Any]] = {}
+    for reason in db.all_profit_reasons():
+        group = groups.setdefault(reason["reason_tag"], {"count": 0, "items": set()})
+        group["count"] += 1
+        group["items"].add(int(reason["item_id"]))
+
+    ranking = []
+    for tag, group in groups.items():
+        linked = [sales_by_item[i] for i in group["items"] if i in sales_by_item]
+        rois = [s["roi"] for s in linked if s["roi"] is not None]
+        days = [s["days_to_sell"] for s in linked if s.get("days_to_sell") is not None]
+        ranking.append({
+            "reason_tag": tag,
+            "count": group["count"],
+            "total_profit": sum(s["profit"] for s in linked),
+            "avg_roi": round(sum(rois) / len(rois), 3) if rois else None,
+            "avg_days": round(sum(days) / len(days), 1) if days else None,
+        })
+    ranking.sort(key=lambda r: (-r["total_profit"], -r["count"]))
+    return ranking
+
+
 def _grade_distribution(sales: list[dict[str, Any]]) -> list[dict[str, Any]]:
     counts: dict[str, int] = {}
     for s in sales:
