@@ -13,7 +13,7 @@ from mercari.db import MercariDatabase, today_jst
 from mercari.decision import is_stale, primary_judgement
 from mercari.exports import build_payload, render, _days_between
 from mercari.importer import import_listing_json
-from mercari.kpi import days_in_stock, inventory_aging, item_capital
+from mercari.kpi import days_in_stock, inventory_aging, item_capital, kpi_dashboard
 from mercari.profit import DEFAULT_FEE_RATE, estimate_profit
 
 
@@ -81,6 +81,9 @@ def state_data() -> dict[str, Any]:
             "listing": listing,
             "days_listed": days_listed,
             "stale": stale,
+            "market_trend": [
+                row["median_price"] for row in history if row.get("median_price") is not None
+            ],
             "reference_price": current_price,
             "estimated_profit": profit,
         })
@@ -125,6 +128,13 @@ class MercariHandler(BaseHTTPRequestHandler):
             return
         if parsed.path == "/api/export":
             self.handle_export(parse_qs(parsed.query))
+            return
+        if parsed.path == "/api/kpi":
+            config = load_config()
+            db = open_db(config)
+            query = parse_qs(parsed.query)
+            months = int((query.get("months") or ["6"])[0])
+            self.send_json({"ok": True, "data": kpi_dashboard(db, months=months)})
             return
         self.send_error(HTTPStatus.NOT_FOUND)
 
@@ -183,6 +193,11 @@ class MercariHandler(BaseHTTPRequestHandler):
             elif path == "/api/improvement":
                 improvement_id = db.add_improvement(body)
                 self.send_json({"ok": True, "improvement_id": improvement_id})
+            elif path == "/api/improvement-status":
+                db.update_improvement_status(
+                    int(body["improvement_id"]), str(body["status"]), body.get("result")
+                )
+                self.send_json({"ok": True})
             elif path == "/api/gpt-review":
                 review_id = db.add_gpt_review(body)
                 self.send_json({"ok": True, "review_id": review_id})
@@ -296,6 +311,7 @@ INDEX_HTML = r"""<!doctype html>
     <nav>
       <button data-tab="items">商品一覧</button>
       <button class="ghost" data-tab="input">登録・入力</button>
+      <button class="ghost" data-tab="kpi">KPI</button>
       <button class="ghost" data-tab="sales">売上分析</button>
       <button class="ghost" data-tab="import">出品JSON取り込み</button>
     </nav>
@@ -466,18 +482,39 @@ INDEX_HTML = r"""<!doctype html>
       </div>
 
       <div class="card">
-        <h2>改善の記録（ChatGPTの提案を実施したら残す）</h2>
+        <h2>改善の記録（ChatGPTの提案と実施結果を残す）</h2>
         <form id="improveForm" class="form-grid">
           <div><label>商品 *</label><select name="item_id" class="itemPick" required></select></div>
           <div><label>種類</label><select name="kind">
             <option>タイトル変更</option><option>説明文変更</option><option>写真変更</option>
             <option>値下げ</option><option>カテゴリー変更</option><option>キーワード追加</option>
             <option>他販路出品</option><option>その他</option></select></div>
-          <div><label>実施日</label><input name="applied_at" type="date"></div>
+          <div><label>状態</label><select name="status">
+            <option value="proposed">提案のみ（未実施）</option>
+            <option value="applied" selected>実施済み</option>
+            <option value="rejected">不採用</option></select></div>
+          <div><label>提案した人</label><select name="source">
+            <option value="chatgpt">ChatGPT</option><option value="user">自分</option></select></div>
+          <div><label>日付</label><input name="applied_at" type="date"></div>
           <div class="wide"><label>内容</label><input name="detail"></div>
           <div class="wide"><label>結果（あとで記入可）</label><input name="result"></div>
           <div class="form-actions wide"><button type="submit">記録</button><span class="hint" id="improveFormMsg"></span></div>
         </form>
+      </div>
+    </section>
+
+    <section class="tab" id="tab-kpi">
+      <div class="card">
+        <h2>月次KPI（直近6ヶ月）</h2>
+        <div id="kpiMonths" class="hint">読み込み中…</div>
+      </div>
+      <div class="card">
+        <h2>在庫・資金効率</h2>
+        <div id="kpiStock" class="hint"></div>
+      </div>
+      <div class="card">
+        <h2>売れなかった理由（全期間の累計）</h2>
+        <div id="kpiReasons" class="hint"></div>
       </div>
     </section>
 
@@ -531,8 +568,62 @@ INDEX_HTML = r"""<!doctype html>
         btn.classList.remove("ghost");
         document.querySelectorAll("section.tab").forEach((s) => s.classList.remove("active"));
         document.getElementById("tab-" + btn.dataset.tab).classList.add("active");
+        if (btn.dataset.tab === "kpi") loadKpi();
       });
     });
+
+    function sparkline(values, width = 160, height = 34) {
+      if (!values || values.length < 2) return "";
+      const min = Math.min(...values);
+      const max = Math.max(...values);
+      const span = Math.max(1, max - min);
+      const points = values.map((v, i) => {
+        const x = 4 + i * ((width - 8) / (values.length - 1));
+        const y = height - 6 - ((v - min) / span) * (height - 12);
+        return `${x.toFixed(1)},${y.toFixed(1)}`;
+      }).join(" ");
+      return `<svg width="${width}" height="${height}" style="vertical-align:middle;border:1px solid #edf0f4;background:#fbfcfd;border-radius:4px">
+        <polyline points="${points}" fill="none" stroke="#2764b3" stroke-width="2"></polyline>
+      </svg>`;
+    }
+
+    async function loadKpi() {
+      const res = await fetch("/api/kpi");
+      const payload = await res.json();
+      if (!payload.ok) return;
+      const d = payload.data;
+      const maxProfit = Math.max(1, ...d.months.map((m) => Math.abs(m.profit)));
+      document.getElementById("kpiMonths").innerHTML = `
+        <table style="width:100%;border-collapse:collapse;font-size:13px">
+          <thead><tr>
+            <th style="text-align:left;padding:6px">月</th><th style="text-align:right;padding:6px">件数</th>
+            <th style="text-align:right;padding:6px">売上</th><th style="text-align:right;padding:6px">利益</th>
+            <th style="text-align:right;padding:6px">粗利率</th><th style="text-align:right;padding:6px">ROI</th>
+            <th style="text-align:right;padding:6px">平均回転</th><th style="text-align:right;padding:6px">赤字件数</th>
+            <th style="text-align:left;padding:6px;width:30%">利益バー</th>
+          </tr></thead>
+          <tbody>${d.months.map((m) => `<tr style="border-top:1px solid #edf0f4">
+            <td style="padding:6px">${m.month}</td>
+            <td style="padding:6px;text-align:right">${m.count}</td>
+            <td style="padding:6px;text-align:right">${fmtYen(m.revenue)}</td>
+            <td style="padding:6px;text-align:right" class="${m.profit >= 0 ? "plus" : "minus"}">${fmtYen(m.profit)}</td>
+            <td style="padding:6px;text-align:right">${m.margin !== null ? (m.margin * 100).toFixed(1) + "%" : "-"}</td>
+            <td style="padding:6px;text-align:right">${m.roi !== null ? (m.roi * 100).toFixed(1) + "%" : "-"}</td>
+            <td style="padding:6px;text-align:right">${m.avg_days_to_sell !== null ? m.avg_days_to_sell + "日" : "-"}</td>
+            <td style="padding:6px;text-align:right" class="${m.loss_count ? "minus" : ""}">${m.loss_count}</td>
+            <td style="padding:6px"><div style="height:12px;border-radius:3px;width:${Math.round(Math.abs(m.profit) / maxProfit * 100)}%;background:${m.profit >= 0 ? "#0f8a5f" : "#c2413a"}"></div></td>
+          </tr>`).join("")}</tbody>
+        </table>`;
+      const agingRows = d.stock.aging.filter((b) => b.count)
+        .map((b) => `${b.label}: ${b.count}件 / ${fmtYen(b.capital)}`).join("<br>") || "在庫なし";
+      document.getElementById("kpiStock").innerHTML = `
+        在庫 ${d.stock.count}点 ／ 寝ている資金 <strong>${fmtYen(d.stock.capital)}</strong><br>
+        ${agingRows}<br>
+        資金効率の目安（今月利益 ÷ 在庫資金）: <strong>${d.capital_efficiency !== null ? (d.capital_efficiency * 100).toFixed(1) + "%" : "-"}</strong>`;
+      document.getElementById("kpiReasons").innerHTML = d.unsold_reasons.length
+        ? d.unsold_reasons.map((r) => `${esc(r.reason_tag)}: ${r.count}件`).join("<br>")
+        : "まだ記録がありません";
+    }
 
     const STATUS_LABELS = {
       candidate: "仕入れ候補", purchased: "仕入れ済み", listed: "出品中",
@@ -576,6 +667,7 @@ INDEX_HTML = r"""<!doctype html>
           <div class="item-detail">
             仕入れ ${fmtYen(item.purchase_price)}（送料${fmtYen(item.purchase_shipping)}）
             ／ 相場中央値 ${market ? fmtYen(market.median_price) : "未登録"}
+            ${item.market_trend && item.market_trend.length >= 2 ? " " + sparkline(item.market_trend) : ""}
             ${market ? `（売切${market.sold_count ?? "-"}件・販売中${market.active_count ?? "-"}件）` : ""}
             ／ 基準価格 ${fmtYen(item.reference_price)}
             ／ 想定利益 <strong class="${profit === null ? "" : (profit >= 0 ? "plus" : "minus")}">${profit === null ? "未計算" : yen.format(profit) + "円"}</strong>

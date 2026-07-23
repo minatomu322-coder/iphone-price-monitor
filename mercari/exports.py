@@ -311,8 +311,11 @@ def stale_payload(db: MercariDatabase, item_id: int, config: dict[str, Any]) -> 
        _text(item.get("images_note")) if item.get("images_note")
        else "画像はこのメッセージに添付してください")
     improvements = db.improvements_for_item(item_id)
+    status_labels = {"proposed": "提案のみ", "applied": "実施済み", "rejected": "不採用"}
     imp_text = " / ".join(
-        f"{str(i['applied_at'])[:10]} {i['kind']}：{i.get('detail') or ''}"
+        f"{str(i['applied_at'])[:10]} {i['kind']}"
+        f"[{status_labels.get(i.get('status') or 'applied', '実施済み')}]"
+        f"：{i.get('detail') or ''}"
         + (f"（結果：{i['result']}）" if i.get("result") else "")
         for i in improvements
     )

@@ -58,6 +58,76 @@ def inventory_aging(
     return buckets
 
 
+def _month_range(anchor: str, offset: int) -> tuple[str, str, str]:
+    """anchor(YYYY-MM-DD)からoffsetヶ月前の (ラベル, 月初, 月末) を返す。"""
+    year, month = int(anchor[:4]), int(anchor[5:7])
+    month -= offset
+    while month <= 0:
+        month += 12
+        year -= 1
+    label = f"{year}-{month:02d}"
+    if month == 12:
+        next_year, next_month = year + 1, 1
+    else:
+        next_year, next_month = year, month + 1
+    last_day = (date(next_year, next_month, 1) - date.resolution).isoformat()
+    return label, f"{label}-01", last_day
+
+
+def _sale_profit(sale: dict[str, Any]) -> int:
+    cost = int(sale.get("purchase_price") or 0) + int(sale.get("purchase_shipping") or 0)
+    return (
+        int(sale["sold_price"]) - int(sale["sales_fee"])
+        - int(sale["shipping_cost"]) - int(sale["other_cost"]) - cost
+    )
+
+
+def monthly_kpis(
+    db: MercariDatabase, months: int = 6, today: str | None = None
+) -> list[dict[str, Any]]:
+    """直近Nヶ月の月次KPI（古い月→新しい月の順）。"""
+    anchor = today or today_jst()
+    series: list[dict[str, Any]] = []
+    for offset in range(months - 1, -1, -1):
+        label, month_start, month_end = _month_range(anchor, offset)
+        sales = db.sales_between(month_start, month_end)
+        profits = [_sale_profit(s) for s in sales]
+        revenue = sum(s["sold_price"] for s in sales)
+        costs = sum(
+            int(s.get("purchase_price") or 0) + int(s.get("purchase_shipping") or 0)
+            for s in sales
+        )
+        turn_days = [s["days_to_sell"] for s in sales if s.get("days_to_sell") is not None]
+        series.append({
+            "month": label,
+            "count": len(sales),
+            "revenue": revenue,
+            "profit": sum(profits),
+            "margin": round(sum(profits) / revenue, 3) if revenue else None,
+            "roi": round(sum(profits) / costs, 3) if costs else None,
+            "avg_days_to_sell": round(sum(turn_days) / len(turn_days), 1) if turn_days else None,
+            "loss_count": sum(1 for p in profits if p < 0),
+        })
+    return series
+
+
+def kpi_dashboard(db: MercariDatabase, months: int = 6, today: str | None = None) -> dict[str, Any]:
+    """KPIダッシュボード用の集計一式。"""
+    stock = stock_summary(db, today)
+    series = monthly_kpis(db, months, today)
+    current = series[-1] if series else None
+    # 資金効率の目安: 今月の利益 ÷ 現在在庫に寝ている資金（在庫ゼロならNone）
+    capital_efficiency = None
+    if current and stock["capital"]:
+        capital_efficiency = round(current["profit"] / stock["capital"], 3)
+    return {
+        "months": series,
+        "stock": {k: v for k, v in stock.items() if k != "items"},
+        "capital_efficiency": capital_efficiency,
+        "unsold_reasons": db.unsold_reason_stats(),
+    }
+
+
 def stock_summary(db: MercariDatabase, today: str | None = None) -> dict[str, Any]:
     """在庫（仕入れ済み・出品中）の資金サマリー。"""
     stock = [i for i in db.list_items() if i["status"] in ("purchased", "listed")]

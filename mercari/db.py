@@ -190,6 +190,9 @@ class MercariDatabase:
     def _migrate(self, conn: sqlite3.Connection) -> None:
         """既存DBへの後方互換マイグレーション（列追加のみ・破壊的変更はしない）。"""
         self._ensure_column(conn, "sales", "days_to_sell", "INTEGER")
+        # 改善のライフサイクル: proposed(提案のみ) -> applied(実施) / rejected(不採用)
+        self._ensure_column(conn, "improvements", "status", "TEXT NOT NULL DEFAULT 'applied'")
+        self._ensure_column(conn, "improvements", "source", "TEXT NOT NULL DEFAULT 'user'")
 
     @staticmethod
     def _ensure_column(conn: sqlite3.Connection, table: str, column: str, ddl_type: str) -> None:
@@ -556,11 +559,14 @@ class MercariDatabase:
     # ---------- improvements ----------
 
     def add_improvement(self, data: dict[str, Any]) -> int:
+        status = data.get("status") or "applied"
+        if status not in ("proposed", "applied", "rejected"):
+            raise ValueError(f"不正なstatus: {status}（proposed/applied/rejectedのいずれか）")
         with self.connect() as conn:
             cur = conn.execute(
                 """
-                INSERT INTO improvements (item_id, applied_at, kind, detail, result)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO improvements (item_id, applied_at, kind, detail, result, status, source)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     int(data["item_id"]),
@@ -568,9 +574,27 @@ class MercariDatabase:
                     data.get("kind") or "その他",
                     data.get("detail"),
                     data.get("result"),
+                    status,
+                    data.get("source") or "user",
                 ),
             )
             return int(cur.lastrowid)
+
+    def update_improvement_status(
+        self, improvement_id: int, status: str, result: str | None = None
+    ) -> None:
+        if status not in ("proposed", "applied", "rejected"):
+            raise ValueError(f"不正なstatus: {status}")
+        with self.connect() as conn:
+            if result is not None:
+                conn.execute(
+                    "UPDATE improvements SET status = ?, result = ? WHERE id = ?",
+                    (status, result, improvement_id),
+                )
+            else:
+                conn.execute(
+                    "UPDATE improvements SET status = ? WHERE id = ?", (status, improvement_id)
+                )
 
     def improvements_for_item(self, item_id: int) -> list[dict[str, Any]]:
         with self.connect() as conn:

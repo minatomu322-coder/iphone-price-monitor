@@ -312,6 +312,74 @@ class Stage1Test(unittest.TestCase):
         self.assertIn("供給過多", text)
 
 
+class Stage2Test(unittest.TestCase):
+    """改善提案ライフサイクル・月次KPI（優先順位2）"""
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.db = MercariDatabase(Path(self.tmp.name) / "test.sqlite3")
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def test_improvement_lifecycle(self) -> None:
+        item_id = self.db.upsert_item({"name": "テスト", "status": "listed"})
+        imp_id = self.db.add_improvement({
+            "item_id": item_id, "kind": "タイトル変更",
+            "detail": "型番をタイトルへ", "status": "proposed", "source": "chatgpt",
+        })
+        imps = self.db.improvements_for_item(item_id)
+        self.assertEqual(imps[0]["status"], "proposed")
+        self.assertEqual(imps[0]["source"], "chatgpt")
+        self.db.update_improvement_status(imp_id, "applied", "閲覧数が増えた")
+        imps = self.db.improvements_for_item(item_id)
+        self.assertEqual(imps[0]["status"], "applied")
+        self.assertEqual(imps[0]["result"], "閲覧数が増えた")
+        with self.assertRaises(ValueError):
+            self.db.add_improvement({"item_id": item_id, "kind": "x", "status": "bad"})
+
+    def test_monthly_kpis(self) -> None:
+        from mercari.kpi import kpi_dashboard, monthly_kpis
+
+        for month, price in (("2026-05", 8000), ("2026-06", 9000), ("2026-07", 7000)):
+            item_id = self.db.upsert_item({
+                "name": f"商品{month}", "purchase_price": 5000,
+                "purchased_at": f"{month}-01", "status": "purchased",
+            })
+            self.db.record_sale({
+                "item_id": item_id, "sold_price": price,
+                "sales_fee": price // 10, "sold_at": f"{month}-15",
+            })
+        series = monthly_kpis(self.db, months=3, today="2026-07-23")
+        self.assertEqual([m["month"] for m in series], ["2026-05", "2026-06", "2026-07"])
+        june = series[1]
+        self.assertEqual(june["count"], 1)
+        self.assertEqual(june["revenue"], 9000)
+        self.assertEqual(june["profit"], 9000 - 900 - 5000)
+        self.assertEqual(june["avg_days_to_sell"], 14.0)
+        # 12月をまたぐ月範囲の計算も確認
+        jan = monthly_kpis(self.db, months=1, today="2026-01-10")
+        self.assertEqual(jan[0]["month"], "2026-01")
+        dashboard = kpi_dashboard(self.db, months=3, today="2026-07-23")
+        self.assertIn("stock", dashboard)
+        self.assertEqual(len(dashboard["months"]), 3)
+
+    def test_stale_export_shows_improvement_status(self) -> None:
+        item_id = self.db.upsert_item({
+            "name": "テスト", "purchase_price": 5000, "status": "listed",
+        })
+        self.db.upsert_listing({
+            "item_id": item_id, "status": "active", "list_price": 9000,
+            "listed_at": "2026-06-01",
+        })
+        self.db.add_improvement({
+            "item_id": item_id, "kind": "値下げ", "detail": "500円下げ",
+            "status": "proposed", "source": "chatgpt",
+        })
+        text = render(build_payload(self.db, "stale", CONFIG, item_id=item_id), "text")
+        self.assertIn("値下げ[提案のみ]", text)
+
+
 class ImporterTest(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = tempfile.TemporaryDirectory()
