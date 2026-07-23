@@ -486,6 +486,52 @@ class ImporterTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             import_listing_json(self.db, "これはJSONではない")
 
+    def test_import_item_with_market_returns_judgement(self) -> None:
+        from mercari.importer import import_item_json
+
+        result = import_item_json(self.db, json.dumps({
+            "type": "mercari_item_info",
+            "name": "クイック登録商品",
+            "model_number": "q-1",
+            "purchase_price": 5000,
+            "purchase_url": "https://example.com/item",
+            "market": {
+                "min_price": 8000, "median_price": 9000,
+                "sold_count": 12, "active_count": 8, "url": "https://example.com/search",
+            },
+        }), CONFIG)
+        item = self.db.get_item(result["item_id"])
+        self.assertEqual(item["status"], "candidate")
+        self.assertEqual(item["purchase_price"], 5000)
+        market = self.db.latest_market(result["item_id"])
+        self.assertEqual(market["median_price"], 9000)
+        self.assertEqual(market["source"], "ChatGPT調査")
+        # 相場込みなので一次判定まで自動で出る
+        self.assertEqual(result["judgement"]["label"], "買い候補")
+
+    def test_import_item_without_market(self) -> None:
+        from mercari.importer import import_item_json
+
+        result = import_item_json(self.db, {
+            "type": "mercari_item_info", "name": "相場なし商品", "purchase_price": 3000,
+        }, CONFIG)
+        self.assertEqual(result["judgement"]["label"], "追加確認")
+        with self.assertRaises(ValueError):
+            import_item_json(self.db, {"type": "mercari_item_info"}, CONFIG)
+
+    def test_import_item_updates_existing(self) -> None:
+        from mercari.importer import import_item_json
+
+        item_id = self.db.upsert_item({"name": "既存商品", "status": "candidate"})
+        result = import_item_json(self.db, {
+            "type": "mercari_item_info", "item_id": item_id,
+            "model_number": "upd-1", "purchase_price": 4000,
+        }, CONFIG)
+        self.assertEqual(result["item_id"], item_id)
+        item = self.db.get_item(item_id)
+        self.assertEqual(item["model_number"], "upd-1")
+        self.assertEqual(item["purchase_price"], 4000)
+
 
 if __name__ == "__main__":
     unittest.main()

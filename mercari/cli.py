@@ -11,7 +11,7 @@ import yaml
 
 from mercari.db import MercariDatabase
 from mercari.exports import FORMATS, build_payload, render
-from mercari.importer import import_listing_json
+from mercari.importer import import_item_json, import_listing_json
 from mercari.notify import notify_sourcing_candidates
 
 
@@ -55,6 +55,14 @@ def cmd_import_listing(args: argparse.Namespace) -> None:
     db = open_db(config)
     raw = Path(args.file).read_text(encoding="utf-8") if args.file else sys.stdin.read()
     result = import_listing_json(db, raw)
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+
+
+def cmd_import_item(args: argparse.Namespace) -> None:
+    config = load_config()
+    db = open_db(config)
+    raw = Path(args.file).read_text(encoding="utf-8") if args.file else sys.stdin.read()
+    result = import_item_json(db, raw, config)
     print(json.dumps(result, ensure_ascii=False, indent=2))
 
 
@@ -114,6 +122,12 @@ def main(argv: list[str] | None = None) -> None:
     p_import = sub.add_parser("import-listing", help="ChatGPTの出品用JSONを下書きとして取り込む")
     p_import.add_argument("--file", help="JSONファイル（省略時は標準入力）")
     p_import.set_defaults(func=cmd_import_listing)
+
+    p_import_item = sub.add_parser(
+        "import-item", help="ChatGPTの商品情報JSONを仕入れ候補として取り込む（一次判定付き）"
+    )
+    p_import_item.add_argument("--file", help="JSONファイル（省略時は標準入力）")
+    p_import_item.set_defaults(func=cmd_import_item)
 
     p_notify = sub.add_parser("notify-candidates", help="一次判定通過の仕入れ候補をDiscordへ通知する")
     p_notify.set_defaults(func=cmd_notify)

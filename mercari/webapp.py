@@ -12,7 +12,7 @@ import yaml
 from mercari.db import MercariDatabase, today_jst
 from mercari.decision import is_stale, primary_judgement
 from mercari.exports import build_payload, render, _days_between
-from mercari.importer import import_listing_json
+from mercari.importer import import_item_json, import_listing_json
 from mercari.kpi import days_in_stock, inventory_aging, item_capital, kpi_dashboard
 from mercari.profit import DEFAULT_FEE_RATE, estimate_profit
 
@@ -210,6 +210,9 @@ class MercariHandler(BaseHTTPRequestHandler):
                 self.send_json({"ok": True, "reason_id": reason_id})
             elif path == "/api/import-listing":
                 result = import_listing_json(db, body.get("json") or body)
+                self.send_json({"ok": True, **result})
+            elif path == "/api/import-item":
+                result = import_item_json(db, body.get("json") or body, config)
                 self.send_json({"ok": True, **result})
             else:
                 self.send_error(HTTPStatus.NOT_FOUND)
@@ -546,6 +549,22 @@ INDEX_HTML = r"""<!doctype html>
 
     <section class="tab" id="tab-import">
       <div class="card">
+        <h2>クイック登録（URLを貼る → ChatGPTに解析させる → JSONを取り込む）</h2>
+        <div class="hint">
+          手順: ① 仕入れ候補のURLを貼って「解析プロンプトをコピー」 ② ChatGPTへ貼り付け（商品ページのスクショや本文も一緒に送るのが確実）
+          ③ 返ってきたJSONを下の欄へ貼って取り込み。相場が含まれていれば<strong>一次判定まで自動</strong>で出ます。
+        </div>
+        <label>商品URL（仕入れ元）</label>
+        <input id="quickUrl" placeholder="https://...">
+        <div class="form-actions">
+          <button id="quickPromptBtn" class="ghost">解析プロンプトをコピー</button>
+        </div>
+        <label>ChatGPTが返した商品情報JSON</label>
+        <textarea id="quickJson" style="min-height:120px" placeholder='{"type":"mercari_item_info","name":"...","purchase_price":5000,"market":{"median_price":9000,...}}'></textarea>
+        <div class="form-actions"><button id="quickImportBtn">仕入れ候補として取り込む</button><span class="hint" id="quickMsg"></span></div>
+      </div>
+
+      <div class="card">
         <h2>ChatGPTが作った出品用JSONの取り込み</h2>
         <div class="hint">
           ChatGPTに「出品作成用データ」を渡すと、タイトル・説明文・価格入りのJSONを返してもらえます。<br>
@@ -856,6 +875,51 @@ INDEX_HTML = r"""<!doctype html>
       if (payload.ok) {
         msg.textContent = payload.message + (payload.warnings.length ? " ⚠ " + payload.warnings.join(" / ") : "");
         document.getElementById("importJson").value = "";
+        await load();
+      } else {
+        msg.textContent = "エラー: " + payload.error;
+      }
+    });
+
+    document.getElementById("quickPromptBtn").addEventListener("click", async () => {
+      const url = document.getElementById("quickUrl").value.trim();
+      if (!url) { toast("先に商品URLを入力してください"); return; }
+      const prompt = [
+        "以下の仕入れ候補商品を解析してください。",
+        "商品URL: " + url,
+        "（このメッセージに商品ページのスクリーンショットまたは本文コピーを添付します）",
+        "",
+        "やってほしいこと:",
+        "1. 商品名・型番・JANコード・ブランド・カテゴリー・状態・付属品・傷や欠品を特定する",
+        "2. 特定できない項目は無理に埋めず、確認すべき点として挙げる",
+        "3. メルカリの売り切れ相場を調査できる場合は、最安値・中央値・売り切れ件数・販売中件数を調べる（できない場合はmarketを省略）",
+        "4. 偽物や型番違いのリスクがあれば警告する",
+        "",
+        "最後に、システム取り込み用として以下の形式のJSONを1つコードブロックで出力してください。",
+        "確認できなかった項目はJSONから省いてください。",
+        '{"type":"mercari_item_info","name":"商品名","model_number":"...","jan_code":"...","brand":"...","category":"...","condition":"...","accessories":"...","flaws":"...","notes":"注意点",',
+        ' "purchase_price":仕入れ価格,"purchase_shipping":仕入れ送料,"purchase_url":"' + url + '","purchase_source":"仕入れ先名",',
+        ' "market":{"min_price":売切最安値,"median_price":売切中央値,"sold_count":売切件数,"active_count":販売中件数,"url":"相場検索URL","notes":"外れ値の扱いなど"}}',
+      ].join("\n");
+      await copyText(prompt);
+    });
+
+    document.getElementById("quickImportBtn").addEventListener("click", async () => {
+      const raw = document.getElementById("quickJson").value.trim();
+      const msg = document.getElementById("quickMsg");
+      if (!raw) { msg.textContent = "JSONを貼り付けてください"; return; }
+      const res = await fetch("/api/import-item", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ json: raw }),
+      });
+      const payload = await res.json();
+      if (payload.ok) {
+        const j = payload.judgement;
+        msg.textContent = payload.message
+          + (j && j.reasons && j.reasons.length ? "（" + j.reasons.join("、") + "）" : "")
+          + (payload.warnings.length ? " ⚠ " + payload.warnings.join(" / ") : "");
+        document.getElementById("quickJson").value = "";
         await load();
       } else {
         msg.textContent = "エラー: " + payload.error;

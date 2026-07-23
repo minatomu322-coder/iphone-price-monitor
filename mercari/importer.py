@@ -22,12 +22,29 @@ from mercari.db import MercariDatabase
 # }
 REQUIRED_KEYS = ("title", "description", "price")
 
+# クイック登録（URL→ChatGPT解析→JSON取り込み）で受け取る商品情報JSONのスキーマ。
+# {
+#   "type": "mercari_item_info",
+#   "item_id": 3,                  // 既存商品を更新する場合のみ
+#   "name": "商品名",               // 新規作成時は必須
+#   "model_number": "...", "jan_code": "...", "brand": "...", "category": "...",
+#   "condition": "...", "accessories": "...", "flaws": "...", "notes": "...",
+#   "purchase_price": 5000, "purchase_shipping": 300,
+#   "purchase_url": "...", "purchase_source": "...",
+#   "market": {                    // ChatGPTが相場を調べられた場合のみ
+#     "min_price": 8000, "median_price": 9000, "mean_price": 9200,
+#     "sold_count": 15, "active_count": 20, "url": "...", "notes": "外れ値2件除外"
+#   }
+# }
+ITEM_INFO_FIELDS = (
+    "name", "model_number", "jan_code", "brand", "category", "condition",
+    "accessories", "flaws", "notes", "purchase_price", "purchase_shipping",
+    "purchase_url", "purchase_source", "planned_price", "min_price",
+    "shipping_method", "shipping_cost", "shipping_days",
+)
 
-def import_listing_json(db: MercariDatabase, raw: str | dict[str, Any]) -> dict[str, Any]:
-    """ChatGPTが生成した出品用JSONを下書き（draft）として取り込む。
 
-    本出品はしない。取り込んだ下書きをユーザーが確認してメルカリへ手動で出品する。
-    """
+def _parse_json(raw: str | dict[str, Any]) -> dict[str, Any]:
     if isinstance(raw, str):
         try:
             data = json.loads(raw)
@@ -37,7 +54,72 @@ def import_listing_json(db: MercariDatabase, raw: str | dict[str, Any]) -> dict[
         data = raw
     if not isinstance(data, dict):
         raise ValueError("JSONオブジェクト（{...}）を渡してください")
+    return data
 
+
+def import_item_json(
+    db: MercariDatabase, raw: str | dict[str, Any], config: dict[str, Any] | None = None
+) -> dict[str, Any]:
+    """ChatGPTが解析した商品情報JSONを仕入れ候補として取り込む。
+
+    相場（market）が含まれていれば相場スナップショットも保存し、
+    一次判定まで済ませて返す。購入・出品などの操作は行わない。
+    """
+    data = _parse_json(raw)
+    warnings: list[str] = []
+
+    item_id = data.get("item_id")
+    values = {key: data.get(key) for key in ITEM_INFO_FIELDS if data.get(key) is not None}
+    if item_id:
+        if not db.get_item(int(item_id)):
+            raise ValueError(f"item {item_id} が見つかりません")
+        db.upsert_item({"id": int(item_id), **values})
+        item_id = int(item_id)
+    else:
+        if not values.get("name"):
+            raise ValueError("nameは必須です（商品を特定できませんでした）")
+        values.setdefault("status", "candidate")
+        item_id = db.upsert_item(values)
+    if values.get("purchase_price") is None and not item_id:
+        warnings.append("仕入れ価格が未入力のため一次判定できません")
+
+    market = data.get("market")
+    if isinstance(market, dict) and market.get("median_price") is not None:
+        db.insert_market_snapshot({
+            "item_id": item_id,
+            "source": market.get("source") or "ChatGPT調査",
+            **{k: market.get(k) for k in (
+                "min_price", "median_price", "mean_price", "max_price",
+                "sold_count", "active_count", "url", "notes",
+            )},
+        })
+    elif market:
+        warnings.append("market.median_priceが無いため相場は保存しませんでした")
+
+    # 取り込み直後に一次判定まで返す（画面・CLIでそのまま確認できる）
+    from mercari.decision import primary_judgement
+
+    item = db.get_item(item_id)
+    judgement = primary_judgement(
+        item, db.latest_market(item_id), db.market_history(item_id), config or {}
+    )
+    return {
+        "item_id": item_id,
+        "warnings": warnings,
+        "judgement": {k: v for k, v in judgement.items() if k != "ladder"},
+        "message": (
+            f"仕入れ候補として保存しました（item {item_id}）。"
+            f"一次判定: {judgement['label']}"
+        ),
+    }
+
+
+def import_listing_json(db: MercariDatabase, raw: str | dict[str, Any]) -> dict[str, Any]:
+    """ChatGPTが生成した出品用JSONを下書き（draft）として取り込む。
+
+    本出品はしない。取り込んだ下書きをユーザーが確認してメルカリへ手動で出品する。
+    """
+    data = _parse_json(raw)
     missing = [key for key in REQUIRED_KEYS if not data.get(key)]
     if missing:
         raise ValueError(f"必須項目が不足しています: {', '.join(missing)}")
