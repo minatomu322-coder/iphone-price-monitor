@@ -6,13 +6,20 @@ from mercari.db import MercariDatabase
 
 
 # 売却実績のスコアリング（100点満点 → S〜D）。
-# ROI（最大40点）・利益額（最大30点）・回転日数（最大30点）の合計。
+# ROI（最大40点）・利益額（最大30点）・回転日数（最大30点）の合計から
+# 資金拘束ペナルティを引く。利益が出ても長期間資金を寝かせた売却は高評価にしない。
 # ラベルの基準はChatGPTと相談して調整しやすいよう1か所にまとめる。
 ROI_POINTS = ((0.30, 40), (0.20, 32), (0.15, 25), (0.05, 15), (0.0001, 8))
 PROFIT_POINTS = ((5000, 30), (3000, 24), (1500, 18), (500, 10), (1, 5))
 DAYS_POINTS = ((7, 30), (14, 24), (30, 16), (60, 8))
 DAYS_POINTS_OVER = 3     # 61日以上
 DAYS_POINTS_UNKNOWN = 10  # 仕入れ日未入力で回転日数が不明（中立点）
+
+# 資金拘束ペナルティ（回転日数と拘束資金の組み合わせで減点）
+CAPITAL_PENALTY_DAYS = ((180, 25), (90, 15), (61, 8))   # 長期化そのものへの減点
+CAPITAL_PENALTY_LARGE = 10        # 高額仕入れ（下記基準以上）が31日超寝た場合の追加減点
+CAPITAL_PENALTY_LARGE_COST = 30000
+CAPITAL_PENALTY_LARGE_DAYS = 30
 
 GRADES = ((85, "S"), (70, "A"), (55, "B"), (40, "C"))
 
@@ -24,10 +31,24 @@ def _tier(value: float, tiers: tuple[tuple[float, int], ...], default: int = 0) 
     return default
 
 
+def capital_penalty(cost: int, days_to_sell: int | None) -> int:
+    """資金拘束ペナルティ（減点）。利益が出ても資金を長く寝かせた売却は評価を下げる。"""
+    if days_to_sell is None:
+        return 0
+    penalty = 0
+    for threshold, points in CAPITAL_PENALTY_DAYS:
+        if days_to_sell >= threshold:
+            penalty = points
+            break
+    if cost >= CAPITAL_PENALTY_LARGE_COST and days_to_sell > CAPITAL_PENALTY_LARGE_DAYS:
+        penalty += CAPITAL_PENALTY_LARGE
+    return penalty
+
+
 def score_sale(
-    profit: int, roi: float | None, days_to_sell: int | None
+    profit: int, roi: float | None, days_to_sell: int | None, cost: int = 0
 ) -> dict[str, Any]:
-    """1件の売却実績を採点する。"""
+    """1件の売却実績を採点する（資金拘束ペナルティ込み）。"""
     roi_points = _tier(roi, ROI_POINTS) if roi is not None else 0
     profit_points = _tier(profit, PROFIT_POINTS)
     if days_to_sell is None:
@@ -38,7 +59,8 @@ def score_sale(
             if days_to_sell <= threshold:
                 days_points = points
                 break
-    total = roi_points + profit_points + days_points
+    penalty = capital_penalty(cost, days_to_sell)
+    total = max(0, roi_points + profit_points + days_points - penalty)
     grade = "D"
     for threshold, label in GRADES:
         if total >= threshold:
@@ -47,7 +69,10 @@ def score_sale(
     return {
         "points": total,
         "grade": grade,
-        "breakdown": {"roi": roi_points, "profit": profit_points, "days": days_points},
+        "breakdown": {
+            "roi": roi_points, "profit": profit_points, "days": days_points,
+            "capital_penalty": -penalty,
+        },
     }
 
 
@@ -71,7 +96,7 @@ def scored_sales(db: MercariDatabase) -> list[dict[str, Any]]:
             - int(s["shipping_cost"]) - int(s["other_cost"]) - cost
         )
         roi = round(profit / cost, 3) if cost > 0 else None
-        score = score_sale(profit, roi, s.get("days_to_sell"))
+        score = score_sale(profit, roi, s.get("days_to_sell"), cost)
         results.append({
             **s,
             "model_number": item.get("model_number"),

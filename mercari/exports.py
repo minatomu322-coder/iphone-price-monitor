@@ -9,7 +9,7 @@ from typing import Any
 
 from mercari.db import MercariDatabase, today_jst
 from mercari.decision import is_stale, primary_judgement
-from mercari.kpi import inventory_aging, item_capital
+from mercari.kpi import failure_costs, inventory_aging, item_capital
 from mercari.profit import DEFAULT_FEE_RATE, breakeven_price, estimate_profit
 
 
@@ -422,6 +422,16 @@ def sales_payload(
     _f(payload, "在庫数", len(stock_items), f"{len(stock_items)}点")
     _f(payload, "未回収在庫金額", stock_value, fmt_yen(stock_value))
     _f(payload, "平均回転日数", avg_turn, f"{avg_turn}日" if avg_turn is not None else "計測不可")
+
+    # 失敗コストの見える化（利益総額だけでなく「いくら失ったか」を明示する）
+    fc = failure_costs(db, date_from, date_to)
+    _f(payload, "累計利益（黒字売却の合計）", fc["gross_profit"], f"{fc['gross_profit']:+,}円")
+    _f(payload, "累計赤字（赤字売却の合計）", fc["gross_loss"], f"{fc['gross_loss']:+,}円")
+    _f(payload, "機会損失（出品時価格からの値下げ分）", fc["markdown_loss"],
+       fmt_yen(fc["markdown_loss"]))
+    _f(payload, "見送り誤り（相場上昇を逃した判断・全期間）", fc["skip_error_count"],
+       f"{fc['skip_error_count']}件")
+    _f(payload, "失敗率（赤字売却÷全売却）", fc["failure_rate"], fmt_pct(fc["failure_rate"]))
 
     def group_table(name: str, key: str, label: str) -> None:
         groups: dict[str, dict[str, int]] = {}

@@ -552,6 +552,85 @@ class Stage5Test(unittest.TestCase):
         self.assertIn("自信度70%以上の判断は1件中1件が正解", text)
 
 
+class Stage6Test(unittest.TestCase):
+    """資金拘束ペナルティ（②）と失敗コストの見える化（⑤）"""
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.db = MercariDatabase(Path(self.tmp.name) / "test.sqlite3")
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def test_capital_penalty(self) -> None:
+        from mercari.scoring import capital_penalty, score_sale
+
+        self.assertEqual(capital_penalty(5000, 10), 0)
+        self.assertEqual(capital_penalty(5000, 61), 8)
+        self.assertEqual(capital_penalty(5000, 90), 15)
+        self.assertEqual(capital_penalty(5000, 180), 25)
+        # 高額仕入れ×31日超は追加減点
+        self.assertEqual(capital_penalty(50000, 40), 10)
+        self.assertEqual(capital_penalty(50000, 90), 25)
+        # 利益5,000円でも半年売れなかったら高評価にしない
+        slow = score_sale(profit=5000, roi=0.30, days_to_sell=180, cost=15000)
+        fast = score_sale(profit=5000, roi=0.30, days_to_sell=7, cost=15000)
+        self.assertEqual(fast["grade"], "S")
+        self.assertEqual(slow["breakdown"]["capital_penalty"], -25)
+        self.assertLess(slow["points"], fast["points"] - 40)
+        self.assertIn(slow["grade"], ("C", "D"))
+
+    def test_failure_costs(self) -> None:
+        from mercari.kpi import failure_costs
+
+        # 黒字売却（出品9,500円→9,000円に値下げして売却）
+        win_id = self.db.upsert_item({
+            "name": "黒字", "purchase_price": 5000, "purchased_at": "2026-06-01",
+            "status": "listed",
+        })
+        listing_id = self.db.upsert_listing({
+            "item_id": win_id, "status": "active", "list_price": 9500, "listed_at": "2026-06-05",
+        })
+        self.db.record_sale({
+            "item_id": win_id, "listing_id": listing_id, "sold_price": 9000,
+            "sales_fee": 900, "sold_at": "2026-06-20",
+        })
+        # 赤字売却
+        lose_id = self.db.upsert_item({
+            "name": "赤字", "purchase_price": 9000, "status": "purchased",
+        })
+        self.db.record_sale({
+            "item_id": lose_id, "sold_price": 8000, "sales_fee": 800, "sold_at": "2026-07-01",
+        })
+        # 見送り誤りの判断
+        skip_id = self.db.upsert_item({"name": "見送り", "purchase_price": 3000})
+        review_id = self.db.add_gpt_review({
+            "item_id": skip_id, "kind": "sourcing", "verdict": "見送り",
+        })
+        self.db.record_review_outcome(review_id, "相場+20%上昇", "incorrect")
+
+        fc = failure_costs(self.db)
+        self.assertEqual(fc["sales_count"], 2)
+        self.assertEqual(fc["gross_profit"], 9000 - 900 - 5000)   # +3100
+        self.assertEqual(fc["gross_loss"], 8000 - 800 - 9000)     # -1800
+        self.assertEqual(fc["net_profit"], 3100 - 1800)
+        self.assertEqual(fc["markdown_loss"], 500)                # 9500→9000
+        self.assertEqual(fc["skip_error_count"], 1)
+        self.assertEqual(fc["failure_rate"], 0.5)
+
+    def test_sales_export_shows_failure_costs(self) -> None:
+        item_id = self.db.upsert_item({
+            "name": "赤字商品", "purchase_price": 9000, "status": "purchased",
+        })
+        self.db.record_sale({
+            "item_id": item_id, "sold_price": 8000, "sales_fee": 800, "sold_at": "2026-07-01",
+        })
+        text = render(sales_payload(self.db, "2026-07-01", "2026-07-31", CONFIG), "text")
+        self.assertIn("累計赤字", text)
+        self.assertIn("失敗率", text)
+        self.assertIn("100.0%", text)  # 1件中1件赤字
+
+
 class ImporterTest(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = tempfile.TemporaryDirectory()

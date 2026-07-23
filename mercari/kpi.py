@@ -111,6 +111,56 @@ def monthly_kpis(
     return series
 
 
+def failure_costs(
+    db: MercariDatabase,
+    date_from: str = "0000-01-01",
+    date_to: str = "9999-12-31",
+) -> dict[str, Any]:
+    """失敗コストの見える化。利益の総額だけでなく「いくら失ったか」を出す。
+
+    - 累計利益: 黒字売却の利益合計
+    - 累計赤字: 赤字売却の損失合計（負の値）
+    - 純利益: 上記の合計
+    - 機会損失（値下げ）: 出品時価格より安く売った差額の合計
+    - 見送り誤り: 「見送り」判断の後に相場が上昇したと答え合わせされた件数
+    - 失敗率: 赤字売却 ÷ 全売却
+    """
+    sales = db.sales_between(date_from, date_to)
+    gross_profit = 0
+    gross_loss = 0
+    markdown_loss = 0
+    loss_count = 0
+    revenue = 0
+    for s in sales:
+        profit = _sale_profit(s)
+        revenue += int(s["sold_price"])
+        if profit >= 0:
+            gross_profit += profit
+        else:
+            gross_loss += profit
+            loss_count += 1
+        if s.get("listing_id"):
+            listing = db.get_listing(int(s["listing_id"]))
+            if listing and listing.get("list_price"):
+                markdown_loss += max(0, int(listing["list_price"]) - int(s["sold_price"]))
+    skip_errors = [
+        r for r in db.all_reviews()
+        if r.get("accuracy") == "incorrect" and "見送り" in (r.get("verdict") or "")
+    ]
+    net = gross_profit + gross_loss
+    return {
+        "sales_count": len(sales),
+        "gross_profit": gross_profit,
+        "gross_loss": gross_loss,
+        "net_profit": net,
+        "markdown_loss": markdown_loss,
+        "skip_error_count": len(skip_errors),
+        "margin": round(net / revenue, 3) if revenue else None,
+        "failure_rate": round(loss_count / len(sales), 3) if sales else None,
+        "loss_count": loss_count,
+    }
+
+
 def kpi_dashboard(db: MercariDatabase, months: int = 6, today: str | None = None) -> dict[str, Any]:
     """KPIダッシュボード用の集計一式。"""
     stock = stock_summary(db, today)
@@ -125,6 +175,7 @@ def kpi_dashboard(db: MercariDatabase, months: int = 6, today: str | None = None
         "stock": {k: v for k, v in stock.items() if k != "items"},
         "capital_efficiency": capital_efficiency,
         "unsold_reasons": db.unsold_reason_stats(),
+        "failure": failure_costs(db),
     }
 
 

@@ -550,6 +550,10 @@ INDEX_HTML = r"""<!doctype html>
         <div id="kpiStock" class="hint"></div>
       </div>
       <div class="card">
+        <h2>失敗コスト（全期間）</h2>
+        <div id="kpiFailure" class="hint"></div>
+      </div>
+      <div class="card">
         <h2>商品スコアとリピート判定（売却実績から自動評価）</h2>
         <div class="hint" style="margin-bottom:8px">
           ROI・利益額・回転日数からS〜Dで採点。全て黒字で平均ROIと回転が基準を満たすと「リピート推奨」になります。
@@ -682,6 +686,16 @@ INDEX_HTML = r"""<!doctype html>
         在庫 ${d.stock.count}点 ／ 寝ている資金 <strong>${fmtYen(d.stock.capital)}</strong><br>
         ${agingRows}<br>
         資金効率の目安（今月利益 ÷ 在庫資金）: <strong>${d.capital_efficiency !== null ? (d.capital_efficiency * 100).toFixed(1) + "%" : "-"}</strong>`;
+      const f = d.failure;
+      document.getElementById("kpiFailure").innerHTML = f.sales_count
+        ? `累計利益（黒字分）: <strong class="plus">${fmtYen(f.gross_profit)}</strong>
+           ／ 累計赤字: <strong class="minus">${fmtYen(f.gross_loss)}</strong>
+           ／ 純利益: <strong class="${f.net_profit >= 0 ? "plus" : "minus"}">${fmtYen(f.net_profit)}</strong><br>
+           機会損失（値下げ分）: ${fmtYen(f.markdown_loss)}
+           ／ 見送り誤り: ${f.skip_error_count}件<br>
+           利益率: ${f.margin !== null ? (f.margin * 100).toFixed(1) + "%" : "-"}
+           ／ 失敗率（赤字売却の割合）: <strong class="${f.failure_rate ? "minus" : ""}">${f.failure_rate !== null ? (f.failure_rate * 100).toFixed(1) + "%" : "-"}</strong>（${f.loss_count}件/${f.sales_count}件）`
+        : "売却実績がまだありません";
       document.getElementById("kpiReasons").innerHTML = d.unsold_reasons.length
         ? d.unsold_reasons.map((r) => `${esc(r.reason_tag)}: ${r.count}件`).join("<br>")
         : "まだ記録がありません";
