@@ -691,6 +691,76 @@ class Stage7Test(unittest.TestCase):
             self.assertIn("期待回転", PREAMBLES[kind])
 
 
+class Stage8Test(unittest.TestCase):
+    """AI連携境界の独立モジュール化（⑦プロンプト生成・JSON解析）"""
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.db = MercariDatabase(Path(self.tmp.name) / "test.sqlite3")
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def test_parse_json_from_code_fence(self) -> None:
+        from mercari.gpt_schemas import parse_json_object
+
+        # AIの返答そのまま（説明文＋コードブロック）でも解析できる
+        reply = (
+            "解析しました。以下がJSONです。\n\n"
+            '```json\n{"type":"mercari_item_info","name":"テスト","purchase_price":5000}\n```\n'
+            "ご確認ください。"
+        )
+        data = parse_json_object(reply)
+        self.assertEqual(data["name"], "テスト")
+        # 素のJSON・辞書もそのまま通る
+        self.assertEqual(parse_json_object('{"a":1}')["a"], 1)
+        self.assertEqual(parse_json_object({"a": 1})["a"], 1)
+        with self.assertRaises(ValueError):
+            parse_json_object("JSONを含まない文章")
+
+    def test_detect_type_and_validation(self) -> None:
+        from mercari.gpt_schemas import detect_type, validate_listing_draft
+
+        self.assertEqual(
+            detect_type({"title": "t", "description": "d", "price": 1000}),
+            "mercari_listing_draft",
+        )
+        self.assertEqual(detect_type({"name": "商品"}), "mercari_item_info")
+        with self.assertRaises(ValueError):
+            detect_type({})
+        with self.assertRaises(ValueError):
+            validate_listing_draft({"title": "t", "description": "d", "price": 100})  # 300円未満
+
+    def test_quick_prompt_contains_contract(self) -> None:
+        from mercari.prompts import quick_analysis_prompt
+
+        prompt = quick_analysis_prompt("https://example.com/item/1")
+        self.assertIn("https://example.com/item/1", prompt)
+        self.assertIn("mercari_item_info", prompt)
+        self.assertIn("confidence", prompt)  # 自信度を必ず返させる
+        self.assertIn("verdict", prompt)
+
+    def test_import_item_records_ai_verdict(self) -> None:
+        from mercari.importer import import_item_json
+
+        result = import_item_json(self.db, {
+            "type": "mercari_item_info", "name": "見解付き商品",
+            "purchase_price": 5000,
+            "verdict": "条件付きで買い", "confidence": 75,
+            "market": {"median_price": 9000, "sold_count": 10},
+        }, CONFIG)
+        review = self.db.latest_gpt_verdict(result["item_id"])
+        self.assertEqual(review["verdict"], "条件付きで買い")
+        self.assertEqual(review["confidence"], 75)
+        self.assertEqual(review["kind"], "sourcing")
+
+    def test_preambles_single_source(self) -> None:
+        # exports.pyのPREAMBLESがprompts.pyと同一オブジェクトであること（二重管理の防止）
+        from mercari import exports, prompts
+
+        self.assertIs(exports.PREAMBLES, prompts.PREAMBLES)
+
+
 class ImporterTest(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = tempfile.TemporaryDirectory()

@@ -1,12 +1,19 @@
 from __future__ import annotations
 
-import json
 from typing import Any
 
 from mercari.db import MercariDatabase
+from mercari.gpt_schemas import (
+    parse_json_object,
+    validate_item_info,
+    validate_listing_draft,
+)
 
 
-# ChatGPTに生成してもらう出品用JSONの想定スキーマ。
+# AI応答JSONのスキーマ定義と解析はgpt_schemas.pyに一元化されている。
+# このモジュールは「検証済みデータをDBへ反映する」ことだけを担当する。
+#
+# 出品用JSON（mercari_listing_draft）:
 # {
 #   "type": "mercari_listing_draft",
 #   "item_id": 3,                    // 既存商品に紐付ける場合。省略時はnameから新規作成
@@ -20,7 +27,6 @@ from mercari.db import MercariDatabase
 #   "shipping_days": "1-2日で発送",
 #   "notes": "..."
 # }
-REQUIRED_KEYS = ("title", "description", "price")
 
 # クイック登録（URL→ChatGPT解析→JSON取り込み）で受け取る商品情報JSONのスキーマ。
 # {
@@ -44,28 +50,16 @@ ITEM_INFO_FIELDS = (
 )
 
 
-def _parse_json(raw: str | dict[str, Any]) -> dict[str, Any]:
-    if isinstance(raw, str):
-        try:
-            data = json.loads(raw)
-        except json.JSONDecodeError as exc:
-            raise ValueError(f"JSONとして読み込めません: {exc}") from exc
-    else:
-        data = raw
-    if not isinstance(data, dict):
-        raise ValueError("JSONオブジェクト（{...}）を渡してください")
-    return data
-
-
 def import_item_json(
     db: MercariDatabase, raw: str | dict[str, Any], config: dict[str, Any] | None = None
 ) -> dict[str, Any]:
-    """ChatGPTが解析した商品情報JSONを仕入れ候補として取り込む。
+    """AIが解析した商品情報JSONを仕入れ候補として取り込む。
 
     相場（market）が含まれていれば相場スナップショットも保存し、
+    AIの一次見解（verdict/confidence）があれば判断履歴にも記録して、
     一次判定まで済ませて返す。購入・出品などの操作は行わない。
     """
-    data = _parse_json(raw)
+    data = validate_item_info(parse_json_object(raw))
     warnings: list[str] = []
 
     item_id = data.get("item_id")
@@ -96,6 +90,16 @@ def import_item_json(
     elif market:
         warnings.append("market.median_priceが無いため相場は保存しませんでした")
 
+    # AIの一次見解が含まれていれば判断履歴として保存（後で自動答え合わせされる）
+    if data.get("verdict"):
+        db.add_gpt_review({
+            "item_id": item_id,
+            "kind": "sourcing",
+            "verdict": data["verdict"],
+            "confidence": data.get("confidence"),
+            "summary": "クイック登録時のAI一次見解",
+        })
+
     # 取り込み直後に一次判定まで返す（画面・CLIでそのまま確認できる）
     from mercari.decision import primary_judgement
 
@@ -119,11 +123,7 @@ def import_listing_json(db: MercariDatabase, raw: str | dict[str, Any]) -> dict[
 
     本出品はしない。取り込んだ下書きをユーザーが確認してメルカリへ手動で出品する。
     """
-    data = _parse_json(raw)
-    missing = [key for key in REQUIRED_KEYS if not data.get(key)]
-    if missing:
-        raise ValueError(f"必須項目が不足しています: {', '.join(missing)}")
-
+    data = validate_listing_draft(parse_json_object(raw))
     warnings: list[str] = []
     item_id = data.get("item_id")
     if item_id:

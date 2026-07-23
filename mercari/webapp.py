@@ -135,6 +135,16 @@ class MercariHandler(BaseHTTPRequestHandler):
         if parsed.path == "/api/export":
             self.handle_export(parse_qs(parsed.query))
             return
+        if parsed.path == "/api/quick-prompt":
+            from mercari.prompts import quick_analysis_prompt
+
+            query = parse_qs(parsed.query)
+            url = (query.get("url") or [""])[0].strip()
+            if not url:
+                self.send_json({"ok": False, "error": "urlを指定してください"}, status=400)
+                return
+            self.send_json({"ok": True, "prompt": quick_analysis_prompt(url)})
+            return
         if parsed.path == "/api/kpi":
             from mercari.scoring import profit_reason_ranking, repeat_candidates
 
@@ -968,24 +978,11 @@ INDEX_HTML = r"""<!doctype html>
     document.getElementById("quickPromptBtn").addEventListener("click", async () => {
       const url = document.getElementById("quickUrl").value.trim();
       if (!url) { toast("先に商品URLを入力してください"); return; }
-      const prompt = [
-        "以下の仕入れ候補商品を解析してください。",
-        "商品URL: " + url,
-        "（このメッセージに商品ページのスクリーンショットまたは本文コピーを添付します）",
-        "",
-        "やってほしいこと:",
-        "1. 商品名・型番・JANコード・ブランド・カテゴリー・状態・付属品・傷や欠品を特定する",
-        "2. 特定できない項目は無理に埋めず、確認すべき点として挙げる",
-        "3. メルカリの売り切れ相場を調査できる場合は、最安値・中央値・売り切れ件数・販売中件数を調べる（できない場合はmarketを省略）",
-        "4. 偽物や型番違いのリスクがあれば警告する",
-        "",
-        "最後に、システム取り込み用として以下の形式のJSONを1つコードブロックで出力してください。",
-        "確認できなかった項目はJSONから省いてください。",
-        '{"type":"mercari_item_info","name":"商品名","model_number":"...","jan_code":"...","brand":"...","category":"...","condition":"...","accessories":"...","flaws":"...","notes":"注意点",',
-        ' "purchase_price":仕入れ価格,"purchase_shipping":仕入れ送料,"purchase_url":"' + url + '","purchase_source":"仕入れ先名",',
-        ' "market":{"min_price":売切最安値,"median_price":売切中央値,"sold_count":売切件数,"active_count":販売中件数,"url":"相場検索URL","notes":"外れ値の扱いなど"}}',
-      ].join("\n");
-      await copyText(prompt);
+      // プロンプトはサーバー側（prompts.py）で一元管理している
+      const res = await fetch("/api/quick-prompt?url=" + encodeURIComponent(url));
+      const payload = await res.json();
+      if (!payload.ok) { toast("エラー: " + payload.error); return; }
+      await copyText(payload.prompt);
     });
 
     document.getElementById("quickImportBtn").addEventListener("click", async () => {

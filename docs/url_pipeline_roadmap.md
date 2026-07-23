@@ -25,13 +25,20 @@ URL貼り付け（クイック登録）
 - 出品用JSON取り込み（下書き）
 - 売却後の学習データ蓄積（スコア・リピート判定・insights出力）
 
-## フェーズ2: OpenAI API連携（コピー往復の自動化）
+## フェーズ2: AI API連携（コピー往復の自動化）
 
-システム内から `mercari_config.yaml` の `openai:` 設定に従ってAPIを呼ぶ。
+AI連携の境界は2モジュールに分離済みで、UI・DBに触れずにAPIへ差し替えられる。
 
-- 実装場所: `mercari/gpt_client.py`（新設）に集約し、既存モジュールへは注入する形にする
+```
+prompts.py     … AIへ渡す文章の生成（依頼文・回答契約・クイック解析プロンプト）
+gpt_schemas.py … AI応答JSONの解析・検証（コードブロック混じりの返答も解析可能）
+```
+
+OpenAI API / Claude API / Gemini APIのどれを使う場合も、
+「prompts.pyの文章を送り、応答をgpt_schemas.pyに通してimporter.pyへ渡す」だけでよい。
+
+- 実装場所: `mercari/gpt_client.py`（新設）に集約し、プロバイダごとのアダプタとして実装する
 - 呼び出し単位は既存の手動フローと同じ粒度にする（商品解析 / 仕入れレビュー / 出品文 / 売れ残り分析 / 月次）
-  → プロンプトは exports.py の PREAMBLES と docs/chatgpt_prompts.md を共通利用
 - 応答は既存のJSONスキーマ（mercari_item_info / mercari_listing_draft）をそのまま使う
   → API化しても取り込み経路は importer.py の1本のままで、手動コピーへいつでも戻せる
 - 必須ガード（config済み・実装時に厳守）:
