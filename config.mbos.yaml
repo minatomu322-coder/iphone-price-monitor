@@ -1,0 +1,181 @@
+# ============================================================
+# MINATO Brand OS 設定
+# ------------------------------------------------------------
+# 「フォロワー増加」ではなく「ブランド構築」を最上位目的とする。
+# 迷ったら "深く・狭く"。数打ちより1本の神リプ。
+# ============================================================
+
+brand:
+  owner: みなと
+  # このOSの北極星指標（フォロワー数ではない）
+  north_star: コンサル導線に乗った見込み客数 × 深い関係(DM/通話/対面)の数
+  mission: ポケカ・トレンドせどりの実践知を発信し、信頼で仲間と見込み客を増やす
+  # みなとが体現したい価値観（リプ生成・投稿提案・ブランド一貫性チェックの軸）
+  values:
+    - 誠実さ・再現性のある実践
+    - 数字より人との関係を大事にする
+    - 学びをオープンに共有する
+    - 煽らない・宣伝臭を出さない
+
+# ターゲット収集・ブランド相性判定に使うキーワード
+keywords:
+  target:
+    - ポケカ
+    - ポケモンカード
+    - ワンピカード
+    - ワンピースカード
+    - トレンドせどり
+    - せどり
+    - メルカリ
+    - 副業
+    - 会社員
+    - AI
+    - FIRE
+    - 資産形成
+    - リベシティ
+  # ブランドと相性が悪い＝避けたいシグナル（スコアを下げる）
+  negative:
+    - 情報商材
+    - 億り人LINE
+    - 必ず稼げる
+    - 無在庫転売
+
+# スコアリング（ヒューリスティック採点。Claudeキー投入で高精度採点に自動昇格）
+scoring:
+  # 各軸の重み（合計は自由。内部で正規化される）
+  weights:
+    brand_fit: 25          # ブランド相性（最重要）
+    consult_ltv: 20        # 将来コンサル見込み（=月100万への直行便）
+    interaction_value: 15  # 仲良くなる価値
+    engagement: 12         # エンゲージ率
+    growth: 10             # 伸び代
+    personality: 8         # 人柄
+    values_fit: 5          # 価値観の一致
+    reply_rate: 3          # 絡みやすさ
+    followers: 2           # 規模（大きさは目的でないので軽い）
+  # フォロワー数の「スイートスポット」。大きすぎると絡めず、小さすぎると価値薄。
+  # この範囲でスコア最大、外れるほど減衰。ブランド構築＝相互に届く距離感を優先。
+  followers_sweet_spot: [500, 20000]
+  # ★変換のしきい値（total_score 0-100）
+  star_thresholds: [80, 65, 45, 25]  # ★5:>=80 / ★4:>=65 / ★3:>=45 / ★2:>=25 / ★1:未満
+
+# Discord 3便通知
+notify:
+  daily_count: 30        # 毎日通知する人数（CEO仕様①: スコア上位30人のみ。水増し禁止）
+  renotify_days: 90      # 一度通知した人物の再通知禁止期間（CEO仕様④）
+  reply_min: 5
+  reply_max: 10          # 夜便で提示する「今日リプする人」
+  reply_cooldown_days: 7 # 直近この日数でリプ済みの相手はリプ候補から外す
+
+# ============================================================
+# Growth Engine（見込み顧客発掘パイプライン）
+# ============================================================
+growth:
+  # SourceAdapter設定。新媒体は growth/sources/ に1ファイル追加＋ここでenabled
+  sources:
+    seed_csv:
+      enabled: true
+    note_rss:
+      enabled: true
+      # noteの公式RSS。ユーザー: /rss、マガジン: /m/<id>/rss（マガジンは複数の書き手を発掘できる）
+      # ※Web検索で実在確認済み(2026-07)。iPhoneからここに追記するだけで翌朝から収集される
+      feeds:
+        # --- せどり・物販 ---
+        - https://note.com/koukan__note/rss      # 現役物販プレイヤーの交換ノート
+        - https://note.com/sedori_mama/rss       # メルカリせどり主婦るか
+        - https://note.com/sedori_love/rss       # はる@せどりLOVE
+        - https://note.com/pure_quince4695/rss   # 花子/メルカリせどり
+        # --- ポケカ・トレカ ---
+        - https://note.com/y3_toreca/rss         # Y@トレカ
+        - https://note.com/note_games/m/mbb212c7c74b1/rss   # ポケカ記事まとめ(マガジン・複数書き手)
+        # --- AI・副業 ---
+        - https://note.com/ai_freak/rss          # AI FREAK
+        - https://note.com/hiro_seki/rss         # ヒロ/文筆×生成AI
+        - https://note.com/aicolumnwriter/rss    # アトカ@AI副業
+        - https://note.com/totyu/rss             # 東中/note×AI
+        - https://note.com/kurashikilog/rss      # クラシキログ/note収益化
+        # --- 投資・FIRE ---
+        - https://note.com/si_esuai/rss          # FIRE中年si/高配当株
+        - https://note.com/investing_info/rss    # FIRE個人投資家ケイ
+        - https://note.com/notemag_business/m/m943d3b8c8446/rss  # 資産運用まとめ(マガジン・複数書き手)
+        # --- フリーランス・副業ライター ---
+        - https://note.com/yumeno_work_k0/rss    # ゆめの。/フリーランス
+        - https://note.com/mmmiyama/rss          # ミヤマ/note副業
+        - https://note.com/yk_memo/rss           # K/Webライター独立
+    blog_rss:
+      enabled: true
+      # 汎用ブログRSS(はてな/WordPress等の公式フィード)。1フィード=書き手1人
+      feeds: []
+    youtube_rss:
+      enabled: true
+      # YouTube公式チャンネルフィード(APIキー不要): https://www.youtube.com/feeds/videos.xml?channel_id=UCxxxx
+      feeds: []
+    # 将来(P2): web_search(Claude API) / x_api / instagram / threads
+  # 巡回支援: 毎日の昼便に表示する参考アカウント数（人間がリプ欄を見て収穫する）
+  patrol_per_day: 3
+
+# 参考アカウント（最大30。巡回支援ローテーションと将来の検索アンカーに使用）
+reference_accounts:
+  - chikaneedesu      # ちかねぇ / トレンドせどり ★イチ推し
+  - yoshi_buppan      # よしー / 物販×AI
+  - satoka01          # さとか / メルカリ・スキマ副業
+  - FIRE147020        # こどおじFIRE / 資産形成
+  - pokeca_kauhito    # ポケカを買う人 / ポケカ投資
+  - GV_gura           # グラ / ポケカ高騰予想
+  - Zabi_pokeka       # ザビマル / トレカ投資速報
+  - pokekananika      # ナニカ / トレカ投資
+  - PokeGetInfoMain   # ポケゲトちゃんねる / ポケカ大手(話題の起点)
+  - pokekameshi       # ポケカ飯 / 大会・デッキ大手
+
+# 検索テーマ（30。将来のweb_search/youtubeアダプタの検索クエリ源。追加削除自由）
+search_themes:
+  - ポケカ
+  - ポケモンカード投資
+  - ワンピースカード
+  - 遊戯王
+  - MTG
+  - デュエマ
+  - ドラゴンボールカード
+  - ディズニーカード
+  - せどり
+  - 物販
+  - Amazon物販
+  - 楽天せどり
+  - メルカリ
+  - ラクマ
+  - 副業
+  - AI活用
+  - ChatGPT
+  - Claude
+  - Claude Code
+  - Gemini
+  - Grok
+  - 自動化
+  - Python
+  - プログラミング副業
+  - FIRE
+  - 資産形成
+  - 投資
+  - 会社員副業
+  - フリーランス
+  - 小規模発信者
+
+# CRM（親密度・再交流）
+relationship:
+  # 交流種別ごとの親密度加点
+  # 自分の行動: like / reply(リプ送信) / follow / dm / meet
+  # 相手の反応(KPIイベント): reply_received(返信された) / followback / consult(相談) / deal(成約)
+  points:
+    like: 2
+    reply: 6
+    follow: 4
+    dm: 15
+    meet: 30
+    reply_received: 10
+    followback: 8
+    consult: 25
+    deal: 40
+  # 1日あたりの親密度自然減衰（放置すると関係が冷める→再交流アラート）
+  decay_per_day: 0.7
+  # ★ランク別の推奨再交流サイクル（日）。上位ほど短い間隔で接触。
+  cadence_days: {5: 2, 4: 4, 3: 7, 2: 14, 1: 30}

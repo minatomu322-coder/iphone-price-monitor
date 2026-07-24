@@ -1,0 +1,84 @@
+name: MBOS P1実測検証（一時・ブランチ限定）
+
+# P1確認フェーズ専用: 本番環境(GitHub Actionsランナー)でGrowth Engineを1回実行し、
+# Sourceごとの実測値を取る。mainマージ後は削除してよい。
+on:
+  push:
+    branches: [claude/x-follower-candidates-i53f2j]
+    paths: [".github/workflows/mbos-verify.yml"]
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+concurrency:
+  group: mbos-verify
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: 依存インストール
+        run: pip install -r requirements-mbos.txt
+
+      - name: Source別タイミング計測（読み取りのみ）
+        env:
+          TZ: Asia/Tokyo
+        run: |
+          python - <<'EOF'
+          import time
+          from minato_brand_os.config import load_config, DEFAULT_DB
+          from minato_brand_os.db import BrandDB
+          from minato_brand_os.growth.sources import REGISTRY
+
+          cfg = load_config()
+          db = BrandDB(DEFAULT_DB)
+          print(f"=== DB実行前: {len(db.all_accounts())}人 ===")
+          t_all = time.time()
+          for name, discover in REGISTRY.items():
+              t = time.time()
+              try:
+                  res = discover(cfg)
+                  print(f"[timing] {name}: {len(res)}件取得 / {time.time()-t:.1f}秒")
+              except Exception as exc:
+                  print(f"[timing] {name}: ERROR {exc}")
+          print(f"[timing] 全Source合計: {time.time()-t_all:.1f}秒")
+          EOF
+
+      - name: パイプライン本実行（発見→採点）
+        env:
+          TZ: Asia/Tokyo
+        run: |
+          time python mbos.py daily
+
+      - name: 実行後ダッシュボード
+        env:
+          TZ: Asia/Tokyo
+        run: |
+          python mbos.py dashboard
+          python - <<'EOF'
+          from minato_brand_os.config import DEFAULT_DB
+          from minato_brand_os.db import BrandDB
+          db = BrandDB(DEFAULT_DB)
+          print(f"=== DB実行後: {len(db.all_accounts())}人 ===")
+          EOF
+
+      - name: DB変化をコミット（実測結果の保存）
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if [ -n "$(git status --porcelain data/brand_os.sqlite3)" ]; then
+            git add data/brand_os.sqlite3
+            git commit -m "P1実測: 本番環境での収集結果 [skip ci]"
+            git push
+          else
+            echo "DB変化なし"
+          fi
