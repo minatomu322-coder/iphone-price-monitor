@@ -52,6 +52,8 @@ from linebot.v3.messaging import (
 )
 from linebot.v3.webhooks import MessageEvent, TextMessageContent
 
+import sheets
+
 # --------------------------------------------------------------------------- #
 # 設定
 # --------------------------------------------------------------------------- #
@@ -221,6 +223,8 @@ def handle_entry(session: Session, user_id: str) -> str:
     name = _get_display_name(user_id)
     session.add(Entry(user_id=user_id, display_name=name))
     session.commit()
+    # Google Sheets「エントリー一覧」へ追記 (未設定なら no-op)
+    sheets.append_entry(name, user_id)
     count = session.scalar(select(func.count()).select_from(Entry)) or 0
     return f"応募を受け付けました！(現在の応募者数: {count}名)\n抽選結果をお待ちください。"
 
@@ -255,6 +259,19 @@ def handle_draw(session: Session, num: int) -> str:
     for e in chosen:
         session.add(Winner(user_id=e.user_id, display_name=e.display_name))
     session.commit()
+
+    # Google Sheets「抽選結果」へ全応募者の当落を追記 (未設定なら no-op)
+    chosen_ids = {e.user_id for e in chosen}
+    sheets.append_results(
+        [
+            (
+                e.display_name,
+                e.user_id,
+                "当選" if e.user_id in chosen_ids else "落選",
+            )
+            for e in entries
+        ]
+    )
 
     lines = [f"🎉 抽選結果 ({num}名当選) 🎉", ""]
     for i, w in enumerate(chosen, start=1):

@@ -3,3 +3,5 @@ gunicorn>=21.2,<23
 line-bot-sdk>=3.11,<4
 SQLAlchemy>=2.0,<3
 psycopg[binary]>=3.1,<4
+gspread>=6.0,<7
+google-auth>=2.28,<3
