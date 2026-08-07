@@ -1,0 +1,35 @@
+# Render Blueprint: LINE 抽選管理BOT (Web Service + PostgreSQL)
+# 使い方は README.md を参照。Render ダッシュボードの Blueprints から
+# このリポジトリを指定するとまとめて作成できます。
+services:
+  - type: web
+    name: line-lottery-bot
+    runtime: python
+    plan: free
+    # サブディレクトリに配置しているためルートを指定
+    rootDir: line_lottery_bot
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app --bind 0.0.0.0:$PORT
+    healthCheckPath: /
+    envVars:
+      # LINE Developers コンソールで発行した値を Render 側で設定 (sync: false)
+      - key: CHANNEL_SECRET
+        sync: false
+      - key: CHANNEL_ACCESS_TOKEN
+        sync: false
+      # 管理者の LINE userId をカンマ区切りで指定
+      - key: ADMIN_USER_IDS
+        sync: false
+      # PostgreSQL の接続文字列を自動注入
+      - key: DATABASE_URL
+        fromDatabase:
+          name: line-lottery-db
+          property: connectionString
+      - key: PYTHON_VERSION
+        value: "3.12.4"
+
+databases:
+  - name: line-lottery-db
+    plan: free
+    # 無料プランのリージョン (必要に応じて変更)
+    region: singapore
