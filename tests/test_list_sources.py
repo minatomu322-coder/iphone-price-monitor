@@ -128,6 +128,13 @@ def test_box_products_reject_supplies_and_singles():
     assert matches_product(golden, "25th ANNIVERSARY GOLDEN BOX【未開封 BOX】{-}")
     classic = Product(product_id="c", title="pokemon", name="ポケモンカードゲーム Classic", form="box", must_keywords=("Classic",))
     assert not matches_product(classic, "ノコッチ( Classic キラ)【-】{015/032} [ CLL ]")
+    assert not matches_product(classic, "リザードン(未開封/ Classic キラ)【-】{003/032} [ CLL ]")   # 未開封でも単品番号あり
+    assert matches_product(classic, "ポケモンカードゲーム Classic【未開封BOX】{-}")
+    from tcg.sources.listing import stock_of
+    assert stock_of("ルフィ (パラレル)【L/P】{ OP01-003 } 49,800円 (税込) 在庫なし") == 0
+    assert stock_of("孫悟空 (パラレル)【SCR☆☆】{ FB04-129 } 74,800円 (税込) ×") == 0
+    assert stock_of("ベジット (パラレル)【SCR☆☆】 94,800円 (税込) 在庫数 2枚") == 2
+    assert stock_of("価格のみ 1,000円") is None
     promo = Product(product_id="p", title="onepiece", name="モンキー・D・ルフィ プロモ P-041", card_no="P-041", form="promo", must_keywords=("ルフィ",))
     assert not matches_product(promo, "(鉛筆マーク無し) モンキー・D・ルフィ (illust:K Akagishi)【P】{P-041}")
     assert matches_product(promo, "モンキー・D・ルフィ(ONE PIECE EMOTION) P P-041")

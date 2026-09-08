@@ -37,6 +37,8 @@ VARIANT_MARKERS: list[tuple[str, re.Pattern[str]]] = [
 # BOX 系商品は、一覧行にこれらの語が無ければ（付属サプライ・単品カード等なので）不一致
 BOX_WORDS = re.compile(r"BOX|ボックス|未開封|セット|パック")
 SUPPLY_WORDS = re.compile(r"サプライ|外箱|コイン|マーカー|スリーブ|デッキシールド|プレイマット|ダメカン|デッキケース")
+SINGLE_CARD_NO = re.compile(r"\{\s*\d+/\d+\s*\}")
+OUT_OF_STOCK = re.compile(r"在庫なし|売り切れ|品切れ|×\s*$")
 
 
 @dataclass
@@ -83,7 +85,8 @@ def matches_product(product: Product, text: str) -> bool:
     if markers_of(norm) != product_markers(product):
         return False
     if product.form == "box":
-        if not BOX_WORDS.search(norm) or SUPPLY_WORDS.search(norm):
+        # 単品カードは {003/032} のような番号を持つ。BOX/セット行は {-} か番号無し
+        if not BOX_WORDS.search(norm) or SUPPLY_WORDS.search(norm) or SINGLE_CARD_NO.search(norm):
             return False
     return product.matches(norm)
 
@@ -95,7 +98,11 @@ def condition_of(text: str) -> str:
 
 def stock_of(text: str) -> int | None:
     match = STOCK_RE.search(text)
-    return int(match.group(1)) if match else None
+    if match:
+        return int(match.group(1))
+    if OUT_OF_STOCK.search(text.strip()):
+        return 0
+    return None
 
 
 def condition_excluded(condition: str, excluded_words: list[str]) -> bool:
