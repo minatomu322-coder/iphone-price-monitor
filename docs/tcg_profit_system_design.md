@@ -349,14 +349,25 @@ flea_market:
 
 ---
 
-## 11. 次のアクション
+## 11. 実装状況
 
-Phase 0〜1（価格収集の稼働＋短期パターンの出力）から着手する。
-着手時点で作るもの：
+Phase 0〜1 は `tcg/` パッケージとして実装済み（使い方は README）。
 
-- `products` / `product_prices` / `product_metrics` / `submissions` テーブルと初期マイグレーション
-- `sources/rakuten.py`（公式API）、`sources/surugaya.py`（販売＋買取）のアダプタ
-- `profit.py`（4チャネルの手取り計算と推奨出口の選定）
-- `strategy.py` の短期スコア
-- `report.py`（CSV出力＋Discord要約）
-- Actions ワークフロー（1日1回 JST 朝）
+| 実装済み | 場所 |
+|---|---|
+| 商品マスタ・SQLite（prices / metrics / submissions / errors） | `tcg/catalog.py` `tcg/database.py` `data/products.csv` |
+| 楽天API・駿河屋（販売＋買取）・フリマ相場シート | `tcg/sources/` |
+| 指標（騰落率・ボラ・流動性・在庫） | `tcg/metrics.py` |
+| 4チャネル手取り比較・推奨出口・フリマ指値 | `tcg/profit.py` |
+| 短期／中期／長期スコア、リスク補正、選定制約 | `tcg/strategy.py` |
+| 24列CSV・Discord要約 | `tcg/report.py` |
+| 毎朝07:00 JST の Actions | `.github/workflows/tcg_daily.yml` |
+
+中期・長期のスコアも実装済みだが、履歴（30日／90日）が貯まるまでは「該当なし」となる。
+
+次にやること：
+1. 楽天アプリID・Discord Webhook を Secrets に登録して初回実行
+2. `data/products.csv` を実運用の監視対象（数百件）に差し替え
+3. 駿河屋URLを登録し `python -m tcg.inspect` で抽出結果を確認
+4. フリマ相場シートの初期入力（主要100件）
+5. 提出実績（`submissions.result`）の記入運用と、係数の補正（Phase 5）

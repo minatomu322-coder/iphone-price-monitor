@@ -1,0 +1,91 @@
+# TCG 利益商品 日次抽出システムの設定（設計: docs/tcg_profit_system_design.md）
+
+database:
+  path: "tcg_prices.sqlite3"        # iPhone用の prices.sqlite3 とは分離
+
+catalog:
+  products: "data/products.csv"     # 監視対象の商品マスタ
+
+output:
+  daily_total: 15
+  per_strategy: { short: 5, mid: 5, long: 5 }
+  cooldown_days: 14                 # 同一商品の再提出禁止期間
+  csv_dir: "reports"                # reports/YYYY-MM-DD.csv を毎日コミット
+  discord_webhook_env: "DISCORD_WEBHOOK_URL"
+  discord_summary: true             # Discordは要約1通のみ
+
+titles:
+  pokemon:     { enabled: true, daily_min: 1 }
+  onepiece:    { enabled: true, daily_min: 1 }
+  fusionworld: { enabled: true, daily_min: 1 }
+
+# 出口チャネル：手取りが最大のものを推奨出口として選ぶ
+#   price_source: scrape = 買取表を自動取得 / manual_sheet = data/flea_market_prices.csv
+channels:
+  mercari:   { enabled: true, fee_rate: 0.10, turnover_days: 14, price_source: manual_sheet }
+  yahoo:     { enabled: true, fee_rate: 0.10, turnover_days: 14, price_source: manual_sheet }
+  kaitori:   { enabled: true, fee_rate: 0.00, turnover_days: 1,  price_source: scrape }
+  wholesale: { enabled: true, fee_rate: 0.00, turnover_days: 3,  rate_of_kaitori: 1.05 }
+
+fees:
+  shipping:
+    single: 210                     # ネコポス等
+    promo: 210
+    graded: 750                     # 宅急便コンパクト
+    box: 800
+    high_value: 1200                # 高額品は補償付き配送
+  packing: 30
+
+# 仕入上限なし。金額で切らず、リスク係数で調整する
+risk:
+  high_value_threshold: 100000      # これ以上を「高額品」として扱う
+  high_value_max_per_day: 3         # 15件中の高額品の上限
+  ungraded_high_value_factor: 0.7   # 未鑑定の高額生カードは真贋リスクで割引
+  capital_halflife_yen: 300000      # 仕入額がこの値でスコア半減（資金拘束）
+
+strategies:
+  short:
+    min_margin: 0.15
+    min_profit: 1500
+    max_turnover_days: 14
+    surge_7d: 0.08                  # 7日騰落がこれ以上なら「急騰」として加点
+  mid:
+    min_margin: 0.25
+    release_window_days: [30, 90]   # 発売後この期間の商品を対象
+    min_history_days: 30
+  long:
+    min_margin: 0.40
+    min_history_days: 90
+    max_volatility: 0.15
+
+# sell側（フリマ相場・買取表）の観測は毎日更新されないため、直近N日以内のものを有効とする
+sell_price_max_age_days: 21
+
+flea_market:
+  auto_scrape: false                # 規約リスク回避のため自動巡回はしない
+  price_sheet: "data/flea_market_prices.csv"  # 相場は人が週1で更新
+  emit_limit_price: true            # 「指値＋探索キーワード」をCSVに出力
+  limit_price_round: 100            # 指値は100円単位に切り下げ
+
+sources:
+  rakuten:
+    enabled: true
+    app_id_env: "RAKUTEN_APP_ID"    # 楽天ウェブサービスのアプリケーションID（Secrets）
+    hits: 30
+    max_listings: 5                 # 商品ごとに保存する最安リスティング数
+    request_delay_seconds: 1
+    # 送料別（postageFlag=1）の商品に加算する送料の見積もり
+    postage_estimate: 300
+  surugaya:
+    enabled: true
+    request_delay_seconds: 3
+    # 検索ページを使う場合のセレクタ（初回実行時に python -m tcg.inspect <URL> で要確認）
+    search_item_selector: ".item, .item_box, li.product"
+    search_title_selector: ".title, .item_title, h3, h4"
+    search_price_selector: ".price, .item_price"
+
+scraping:
+  timeout_seconds: 20
+  connect_timeout: 30
+  retry_total: 3
+  retry_backoff: 3

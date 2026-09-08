@@ -1,0 +1,56 @@
+name: TCG利益商品 日次抽出
+
+on:
+  schedule:
+    # 毎朝 07:00 JST（= 22:00 UTC 前日）に1回。価格収集 → 15件選定 → CSV/Discord
+    - cron: "0 22 * * *"
+  workflow_dispatch: {}
+
+# tcg_prices.sqlite3 と reports/*.csv をコミットで戻すため書き込み権限が必要
+permissions:
+  contents: write
+
+concurrency:
+  group: tcg-daily
+  cancel-in-progress: false
+
+jobs:
+  daily:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: リポジトリを取得
+        uses: actions/checkout@v4
+
+      - name: Python 3.11 を準備
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: 依存パッケージをインストール
+        run: pip install -r requirements.txt
+
+      - name: 価格収集と候補抽出を実行
+        env:
+          RAKUTEN_APP_ID: ${{ secrets.RAKUTEN_APP_ID }}
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          TZ: Asia/Tokyo
+        run: python -m tcg.main
+
+      - name: DBとCSVの変化をコミットして保存
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add tcg_prices.sqlite3 reports/*.csv 2>/dev/null || true
+          if [ -n "$(git status --porcelain tcg_prices.sqlite3 reports)" ]; then
+            git commit -m "tcg data update [skip ci]"
+            for i in 1 2 3; do
+              if git push; then
+                echo "push成功"; break
+              fi
+              echo "push失敗。rebaseして再試行 ($i/3)"
+              git pull --rebase --autostash origin "${GITHUB_REF_NAME}" && sleep 3
+            done
+          else
+            echo "変化なし。コミットは行いません。"
+          fi
