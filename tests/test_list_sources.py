@@ -67,9 +67,37 @@ def test_cardrush_parse_and_filter():
     assert listings[0].url == "https://www.cardrush-pokemon.jp/product/51078"
     assert listings[0].stock == 55 and listings[2].condition == "状態B"
     found = to_observations(lizardon(), listings, {"max_listings": 5})
-    # 型番一致(349/190)・状態B/PSA除外・在庫0除外 → 37,800 のみ
+    # 型番一致(349/190)・状態A-/B/PSA除外・在庫0除外 → 37,800 のみ
     assert [o.price for o in found] == [37800]
     assert found[0].side == "buy" and found[0].source == "cardrush"
+    # 状態A- を許可する設定なら 31,800(在庫0) は除外のまま、29,800(状態B) も除外
+    relaxed = to_observations(lizardon(), listings, {"max_listings": 5, "exclude_conditions": ["PSA", "状態B"]})
+    assert [o.price for o in relaxed] == [37800]
+
+
+def test_variant_markers_separate_same_card_number():
+    nami_p = nami()
+    # 同じ OP01-016 でも 和柄SP／漫画背景SP／スーパーパラレル は別カード
+    assert matches_product(nami_p, "ナミ (パラレル) OP01-016 R")
+    assert matches_product(nami_p, "ナミ ( パラレル /illust:Sunohara/青背景)【R/P】{OP01-016}")
+    assert not matches_product(nami_p, "ナミ ( パラレル /和柄/illust:S-KINOKO)【SP】{OP01-016[OP05]}")
+    assert not matches_product(nami_p, "ナミ(パラレル/漫画背景/漫画絵) SEC-SP OP01-016")
+    assert not matches_product(nami_p, "ナミ (スーパーパラレル) OP01-016 R")
+    assert not matches_product(nami_p, "ナミ OP01-016 R")            # 通常版
+    okiku_sp = Product(product_id="o", title="onepiece", name="お菊 SP", card_no="OP01-035", must_keywords=("お菊",))
+    assert not matches_product(okiku_sp, "お菊 (illust:Yosuke Adachi)【R】{OP01-035}")
+    assert matches_product(okiku_sp, "お菊(パラレル/SP/illust:Denim2) SP OP01-035") is False  # パラレル記号が商品側に無い
+    okiku_sp2 = Product(product_id="o", title="onepiece", name="お菊 パラレル SP", card_no="OP01-035", must_keywords=("お菊",))
+    assert matches_product(okiku_sp2, "お菊(パラレル/SP/illust:Denim2) SP OP01-035")
+    goku = Product(product_id="g", title="fusionworld", name="孫悟空 SCR☆☆", card_no="FB04-129", must_keywords=("孫悟空",))
+    assert matches_product(goku, "孫悟空(パラレル/フレーム無) SCR★★ FB04-129") is False   # パラレル記号
+    goku2 = Product(product_id="g", title="fusionworld", name="孫悟空 パラレル SCR☆☆", card_no="FB04-129", must_keywords=("孫悟空",))
+    assert matches_product(goku2, "孫悟空(パラレル/フレーム無) SCR★★ FB04-129")
+    assert not matches_product(goku2, "孫悟空 (パラレル)【 SCR ☆】{FB04-129}")
+    # OP01 リーダーパラレルは「漫画絵」表記でも同一カード
+    luffy = Product(product_id="l", title="onepiece", name="モンキー・D・ルフィ リーダーパラレル", card_no="OP01-003", must_keywords=("ルフィ", "パラレル"))
+    assert matches_product(luffy, "モンキー・D・ルフィ(パラレル/漫画絵) L-P OP01-003")
+    assert matches_product(luffy, "モンキー・D・ルフィ (パラレル) OP01-003 L")
 
 
 def test_toretoku_parse_and_match():
@@ -84,7 +112,7 @@ def test_pricebase_parse_and_match_fullwidth():
     assert [l.price for l in listings] == [58000, 6500, 250000]
     matched = [l for l in listings if matches_product(nami(), l.text)]
     assert [l.price for l in matched] == [6500]
-    luffy = Product(product_id="l", title="onepiece", name="ルフィ", card_no="OP11-118", must_keywords=("ルフィ",))
+    luffy = Product(product_id="l", title="onepiece", name="ルフィ パラレル", card_no="OP11-118", must_keywords=("ルフィ",))
     assert matches_product(luffy, listings[0].text)   # 全角Ｄ・全角括弧でも一致
 
 

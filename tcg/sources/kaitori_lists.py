@@ -50,10 +50,13 @@ class KaitoriListSource:
         matched = [item for item in self.listings_for(product.title) if matches_product(product, item.text)]
         if not matched:
             return []
-        # 同一カードの複数行（状態違い等）は、買取上限として最も高いものを採用
-        best = max(matched, key=lambda item: item.price)
+        # 複数行が残った場合（絵違い・状態違い等）は、出口価格を過大評価しないよう最も低いものを採用
+        best = min(matched, key=lambda item: item.price)
         if debug_enabled():
             print(f"[debug] {self.name} {product.product_id}: 一致 {len(matched)} → {best.price:,}円 {best.text[:70]}")
+            for item in matched[:4]:
+                if item is not best:
+                    print(f"[debug]     他: {item.price:,}円 {item.text[:70]}")
         return [
             Observation(
                 product_id=product.product_id,

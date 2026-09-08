@@ -18,7 +18,10 @@ DEFAULT_HOSTS = {
     "onepiece": "https://www.cardrush-op.jp",
     "fusionworld": "https://www.cardrush-db.jp",
 }
-DEFAULT_EXCLUDED_CONDITIONS = ["PSA", "鑑定", "状態B", "状態C", "状態D", "キズ", "傷"]
+# 出口価格は美品前提なので、仕入側も 状態A- 以下は既定で除外（config で緩められる）
+DEFAULT_EXCLUDED_CONDITIONS = ["PSA", "鑑定", "状態A-", "状態B", "状態C", "状態D", "キズ", "傷"]
+# 検索語から落とす語（検索に効かず、むしろヒットを減らす）
+KEYWORD_NOISE = re.compile(r"リーダー|SEC|SR|SAR|SCR|プロモ|P-\d+|[（(].*?[)）]|☆+|★+")
 
 
 class CardrushSource:
@@ -32,26 +35,39 @@ class CardrushSource:
         self.scraping = scraping
         self.hosts = {**DEFAULT_HOSTS, **(settings.get("hosts") or {})}
 
-    def search_url(self, product: Product) -> str | None:
+    def keywords(self, product: Product) -> list[str]:
+        """検索語の候補。まず商品名からノイズ語を除いたもの、0件なら先頭の語（キャラ名）だけで再検索。"""
+        primary = re.sub(r"\s+", " ", KEYWORD_NOISE.sub(" ", product.name)).strip() or product.name
+        fallback = primary.split(" ")[0]
+        return [primary] if fallback == primary else [primary, fallback]
+
+    def search_url(self, product: Product, keyword: str) -> str | None:
         host = self.hosts.get(product.title)
         if not host:
             return None
-        keyword = re.sub(r"[（(].*?[)）]", "", product.name).strip() or product.name
         return f"{host}/product-list?keyword={quote(keyword)}"
 
     def fetch(self, product: Product) -> list[Observation]:
-        url = self.search_url(product)
-        if not url:
-            return []
-        polite_sleep(float(self.settings.get("request_delay_seconds", 3)))
-        response = self.session.get(url, timeout=timeouts(self.scraping))
-        response.raise_for_status()
-        listings = parse_search_results(response.text, url)
+        listings: list[Listing] = []
+        url = ""
+        for keyword in self.keywords(product):
+            url = self.search_url(product, keyword) or ""
+            if not url:
+                return []
+            polite_sleep(float(self.settings.get("request_delay_seconds", 3)))
+            response = self.session.get(url, timeout=timeouts(self.scraping))
+            response.raise_for_status()
+            listings = parse_search_results(response.text, url)
+            if listings:
+                break
         observations = to_observations(product, listings, self.settings)
         if debug_enabled():
             print(f"[debug] cardrush {product.product_id}: 行 {len(listings)} → 一致 {len(observations)} {url}")
             for obs in observations[:3]:
                 print(f"[debug]   {obs.price:,}円 stock={obs.stock} {obs.condition or '-'} {obs.raw_text[:70]}")
+            if listings and not observations:
+                for item in listings[:3]:
+                    print(f"[debug]   不一致例: {item.price:,}円 {item.text[:80]}")
         return observations
 
 
