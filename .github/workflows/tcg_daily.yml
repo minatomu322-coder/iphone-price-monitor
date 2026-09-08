@@ -1,6 +1,11 @@
 name: TCG利益商品 日次抽出
 
 on:
+  # ★検証用（一時）: このブランチへの push で自動的にデバッグ＋ドライラン実行。
+  #   main にマージしたら push トリガーは削除する。
+  push:
+    branches: ["claude/bs-a-profit-product-system-35qhl6"]
+    paths-ignore: ["reports/**", "tcg_prices.sqlite3"]
   schedule:
     # 毎朝 07:00 JST（= 22:00 UTC 前日）に1回。価格収集 → 15件選定 → CSV/Discord
     - cron: "0 22 * * *"
@@ -44,8 +49,9 @@ jobs:
           RAKUTEN_APP_ID: ${{ secrets.RAKUTEN_APP_ID }}
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
           TZ: Asia/Tokyo
-          TCG_DEBUG: ${{ inputs.debug == true && '1' || '' }}
-        run: python -m tcg.main ${{ inputs.dry_run == true && '--dry-run' || '' }}
+          # push（検証）時は常にデバッグ＋ドライラン。手動実行時は入力に従う。
+          TCG_DEBUG: ${{ (github.event_name == 'push' || inputs.debug == true) && '1' || '' }}
+        run: python -m tcg.main ${{ (github.event_name == 'push' || inputs.dry_run == true) && '--dry-run' || '' }}
 
       - name: DBとCSVの変化をコミットして保存
         run: |
