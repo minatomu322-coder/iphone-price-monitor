@@ -84,7 +84,9 @@ sources:
     request_delay_seconds: 1
     postage_estimate: 300
   surugaya:
-    enabled: true
+    # 2026-09 検証: GitHub Actions からのアクセスは全件 403（Cloudflare）で拒否されるため無効化。
+    # 回避策は行わない。自宅PCなど通常の回線から手動実行する場合のみ true にする。
+    enabled: false
     request_delay_seconds: 3
     # 検索ページを使う場合のセレクタ（初回実行時に python -m tcg.inspect <URL> で要確認）
     search_item_selector: ".item, .item_box, li.product"
