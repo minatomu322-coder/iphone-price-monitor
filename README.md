@@ -17,7 +17,9 @@ tcg/
   main.py           日次パイプライン（収集 → 指標 → 3戦略スコア → 選定 → CSV/Discord）
   catalog.py        商品マスタ data/products.csv の読込
   database.py       SQLite（tcg_prices.sqlite3）
-  sources/          価格ソース: rakuten(公式API) / surugaya(販売+買取) / manual_sheet(フリマ相場)
+  sources/          価格ソース（下表）: cardrush / toretoku / pricebase / rakuten / yahoo / manual_sheet
+  probe.py          候補サイトの到達性と robots.txt を確認（Actions の検証実行で使用）
+  dump.py           候補ページの価格要素の構造をログに出す（手動デバッグ実行時のみ）
   metrics.py        騰落率・ボラ・流動性・在庫などの指標
   profit.py         4チャネル（メルカリ/ヤフオク/買取店/業者間卸）の手取り比較と推奨出口
   strategy.py       短期/中期/長期のスコアと選定制約
@@ -30,17 +32,31 @@ data/
 reports/YYYY-MM-DD.csv          毎日の提出用CSV（Actions がコミット）
 ```
 
+### 価格ソース（2026-09 に GitHub Actions からの到達性を実測して選定）
+
+| ソース | 側 | 対象 | 備考 |
+|---|---|---|---|
+| カードラッシュ通販（`cardrush-pokemon.jp` / `cardrush-op.jp` / `cardrush-db.jp`） | 仕入（販売価格・在庫） | 3タイトル | 検索結果から型番一致の最安。鑑定品・状態B以下は除外 |
+| トレトク 買取価格表 | 出口（買取） | ポケカ／ワンピ | 1ページに数百件。タイトルごとに1回取得 |
+| PRICE BASE 買取表 | 出口（買取） | 3タイトル | robots.txt の Crawl-delay 5 に従う |
+| 楽天市場 商品検索API | 仕入 | 3タイトル | **要 `RAKUTEN_APP_ID` + `RAKUTEN_ACCESS_KEY`**（2026-02 の新基盤仕様） |
+| Yahoo!ショッピング API | 仕入 | 3タイトル | 要 `YAHOO_APP_ID` |
+| フリマ相場シート | 出口（メルカリ等） | 3タイトル | 人が週1で更新 |
+| 駿河屋 | — | — | Actions からは全件 403（Cloudflare）のため無効化。回避はしない |
+
+キー無しでも **カードラッシュ＋トレトク／PRICE BASE** で仕入・出口の両側が揃うため、短期パターンは動く。
+
 ### セットアップ
 
-1. GitHub Secrets に以下を登録
-   - `RAKUTEN_APP_ID` … 楽天ウェブサービスのアプリケーションID（無料）
+1. GitHub Secrets に以下を登録（任意。無くてもカードラッシュ／買取表だけで動く）
+   - `RAKUTEN_APP_ID` と `RAKUTEN_ACCESS_KEY` … 楽天ウェブサービス（2026-02 以降はアプリ再登録でアクセスキーも発行される）
+   - `YAHOO_APP_ID` … Yahoo!デベロッパーネットワークの Client ID
    - `DISCORD_WEBHOOK_URL` … 既存のものを流用可
 2. `data/products.csv` に監視したい商品を登録
-   - `must_keywords` / `exclude_keywords` は `|` 区切り。検索結果の商品名を絞る（PSA・プロキシ・まとめ売り等を除外）
-   - 駿河屋を使う場合は `surugaya_url`（販売 or 検索ページ）と `surugaya_kaitori_url`（買取ページ）を記入し、
-     初回は `python -m tcg.inspect <URL>` で価格が正しく取れるか確認する
+   - `card_no`（型番）は必ず入れる。一覧ページとの照合キーになる
+   - `must_keywords` / `exclude_keywords` は `|` 区切り。商品名を絞る（PSA・プロキシ・まとめ売り・スーパーパラレル等を除外）
 3. `data/flea_market_prices.csv` にメルカリ等の相場（中央値・直近30日売れ数）を記入（週1更新）
-4. ワークフロー `TCG利益商品 日次抽出` は毎朝 07:00 JST に自動実行。手動実行も可
+4. ワークフロー `TCG利益商品 日次抽出` は毎朝 07:00 JST に自動実行。手動実行（`debug` / `dry_run` 入力あり）も可
 
 ### ローカル実行
 
