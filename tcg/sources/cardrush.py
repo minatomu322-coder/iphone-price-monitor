@@ -9,7 +9,15 @@ from bs4 import BeautifulSoup
 
 from ..models import Observation, Product
 from .base import parse_price, polite_sleep, timeouts
-from .listing import Listing, condition_excluded, condition_of, debug_enabled, matches_product, stock_of
+from .listing import (
+    Listing,
+    condition_excluded,
+    condition_of,
+    debug_enabled,
+    matches_product,
+    normalize,
+    stock_of,
+)
 
 
 # カードラッシュ通販（タイトルごとに別ドメイン）。robots.txt は一般UAを許可。
@@ -20,8 +28,10 @@ DEFAULT_HOSTS = {
 }
 # 出口価格は美品前提なので、仕入側も 状態A- 以下は既定で除外（config で緩められる）
 DEFAULT_EXCLUDED_CONDITIONS = ["PSA", "鑑定", "状態A-", "状態B", "状態C", "状態D", "キズ", "傷"]
-# 検索語から落とす語（検索に効かず、むしろヒットを減らす）
-KEYWORD_NOISE = re.compile(r"リーダー|SEC|SR|SAR|SCR|プロモ|P-\d+|[（(].*?[)）]|☆+|★+")
+# 検索語から落とす語（検索に効かず、むしろヒットを減らす）。英字は単語境界付きで（ANNIVERSARY の SAR 等を壊さない）
+KEYWORD_NOISE = re.compile(
+    r"リーダー|プロモ|(?<![A-Za-z])(?:SEC|SR|SAR|SCR|SP|P-\d+)(?![A-Za-z])|[（(].*?[)）]|☆+|★+"
+)
 
 
 class CardrushSource:
@@ -36,10 +46,19 @@ class CardrushSource:
         self.hosts = {**DEFAULT_HOSTS, **(settings.get("hosts") or {})}
 
     def keywords(self, product: Product) -> list[str]:
-        """検索語の候補。まず商品名からノイズ語を除いたもの、0件なら先頭の語（キャラ名）だけで再検索。"""
+        """検索語の候補（順に試し、対象の型番を含む行が出た時点で確定）。
+        1) 型番＋名前（検索結果が100件超で対象が2ページ目以降に落ちるのを防ぐ）
+        2) 名前からノイズ語を除いたもの
+        3) 先頭の語（キャラ名）だけ
+        """
         primary = re.sub(r"\s+", " ", KEYWORD_NOISE.sub(" ", product.name)).strip() or product.name
-        fallback = primary.split(" ")[0]
-        return [primary] if fallback == primary else [primary, fallback]
+        candidates: list[str] = []
+        if product.card_no:
+            candidates.append(f"{product.card_no} {primary.split(' ')[0]}")
+        candidates.append(primary)
+        candidates.append(primary.split(" ")[0])
+        seen: set[str] = set()
+        return [k for k in candidates if k and not (k in seen or seen.add(k))]
 
     def search_url(self, product: Product, keyword: str) -> str | None:
         host = self.hosts.get(product.title)
@@ -58,7 +77,10 @@ class CardrushSource:
             response = self.session.get(url, timeout=timeouts(self.scraping))
             response.raise_for_status()
             listings = parse_search_results(response.text, url)
-            if listings:
+            # 型番を含む行が1つでもあれば、この検索語で確定（一致0でも別の検索語には進まない）
+            if listings and (not product.card_no or any(
+                normalize(product.card_no).lower() in normalize(item.text).lower() for item in listings
+            )):
                 break
         observations = to_observations(product, listings, self.settings)
         if debug_enabled():

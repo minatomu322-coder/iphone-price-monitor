@@ -26,7 +26,17 @@ VARIANT_MARKERS: list[tuple[str, re.Pattern[str]]] = [
     ("star2", re.compile(r"☆☆")),
     ("star1", re.compile(r"(?<!☆)☆(?!☆)")),
     ("graded", re.compile(r"PSA|BGS|ARS|鑑定")),
+    # 再版・地域版・シリアル・カートン等は別商品扱い（一覧行にだけ付いていたら不一致）
+    ("no_pencil", re.compile(r"鉛筆マーク(?:無し|なし)")),
+    ("asia", re.compile(r"(?i)asia|アジア版")),
+    ("english", re.compile(r"英語版|(?<![A-Za-z])EN(?![A-Za-z])")),
+    ("serial", re.compile(r"シリアル")),
+    ("carton", re.compile(r"カートン")),
 ]
+
+# BOX 系商品は、一覧行にこれらの語が無ければ（付属サプライ・単品カード等なので）不一致
+BOX_WORDS = re.compile(r"BOX|ボックス|未開封|セット|パック")
+SUPPLY_WORDS = re.compile(r"サプライ|外箱|コイン|マーカー|スリーブ|デッキシールド|プレイマット|ダメカン|デッキケース")
 
 
 @dataclass
@@ -72,6 +82,9 @@ def matches_product(product: Product, text: str) -> bool:
         return False
     if markers_of(norm) != product_markers(product):
         return False
+    if product.form == "box":
+        if not BOX_WORDS.search(norm) or SUPPLY_WORDS.search(norm):
+            return False
     return product.matches(norm)
 
 

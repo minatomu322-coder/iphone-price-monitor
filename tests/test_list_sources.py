@@ -116,6 +116,32 @@ def test_pricebase_parse_and_match_fullwidth():
     assert matches_product(luffy, listings[0].text)   # 全角Ｄ・全角括弧でも一致
 
 
+def test_box_products_reject_supplies_and_singles():
+    box = Product(
+        product_id="b", title="pokemon", name="シャイニートレジャーex BOX", form="box",
+        must_keywords=("シャイニートレジャー", "BOX"), exclude_keywords=("開封済", "バラ", "カートン", "デッキビルド"),
+    )
+    assert matches_product(box, "ハイクラスパック『 シャイニートレジャーex 』(SV4a)【未開封 BOX 】{-} [ 未開封 BOX ]")
+    assert not matches_product(box, "〔カートン販売〕ハイクラスパック『 シャイニートレジャーex 』(SV4a)【未開封 BOX 】")
+    golden = Product(product_id="g", title="pokemon", name="25th ANNIVERSARY GOLDEN BOX", form="box", must_keywords=("GOLDEN BOX",))
+    assert not matches_product(golden, "カードボックス『外箱( 25th ANNIVERSARY GOLDEN BOX )』【サプライ】{-}")
+    assert matches_product(golden, "25th ANNIVERSARY GOLDEN BOX【未開封 BOX】{-}")
+    classic = Product(product_id="c", title="pokemon", name="ポケモンカードゲーム Classic", form="box", must_keywords=("Classic",))
+    assert not matches_product(classic, "ノコッチ( Classic キラ)【-】{015/032} [ CLL ]")
+    promo = Product(product_id="p", title="onepiece", name="モンキー・D・ルフィ プロモ P-041", card_no="P-041", form="promo", must_keywords=("ルフィ",))
+    assert not matches_product(promo, "(鉛筆マーク無し) モンキー・D・ルフィ (illust:K Akagishi)【P】{P-041}")
+    assert matches_product(promo, "モンキー・D・ルフィ(ONE PIECE EMOTION) P P-041")
+
+
+def test_cardrush_keywords_keep_anniversary_intact():
+    from tcg.sources.cardrush import CardrushSource
+    src = CardrushSource.__new__(CardrushSource)
+    golden = Product(product_id="g", title="pokemon", name="25th ANNIVERSARY GOLDEN BOX", form="box")
+    assert src.keywords(golden) == ["25th ANNIVERSARY GOLDEN BOX", "25th"]
+    luffy = Product(product_id="l", title="onepiece", name="モンキー・D・ルフィ リーダーパラレル", card_no="OP01-003")
+    assert src.keywords(luffy) == ["OP01-003 モンキー・D・ルフィ", "モンキー・D・ルフィ パラレル", "モンキー・D・ルフィ"]
+
+
 def test_normalize_and_psa_guard():
     assert normalize("モンキー・Ｄ・ルフィ（パラレル）ＯＰ０１－００３") == "モンキー・D・ルフィ(パラレル)OP01-003"
     raw = Product(product_id="x", title="pokemon", name="n", card_no="349/190", must_keywords=("リザードン",))
