@@ -51,6 +51,7 @@ jobs:
       - name: 価格収集と候補抽出を実行
         env:
           RAKUTEN_APP_ID: ${{ secrets.RAKUTEN_APP_ID }}
+          YAHOO_APP_ID: ${{ secrets.YAHOO_APP_ID }}
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
           TZ: Asia/Tokyo
           # push（検証）時は常にデバッグ＋ドライラン。手動実行時は入力に従う。

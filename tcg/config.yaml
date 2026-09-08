@@ -76,6 +76,13 @@ sources:
     request_delay_seconds: 1
     # 送料別（postageFlag=1）の商品に加算する送料の見積もり
     postage_estimate: 300
+  yahoo_shopping:
+    enabled: true
+    app_id_env: "YAHOO_APP_ID"      # Yahoo!デベロッパーネットワークの Client ID（Secrets）
+    hits: 30
+    max_listings: 5
+    request_delay_seconds: 1
+    postage_estimate: 300
   surugaya:
     enabled: true
     request_delay_seconds: 3

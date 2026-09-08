@@ -14,7 +14,14 @@ from .metrics import compute_metrics
 from .models import Candidate, Product
 from .profit import compute_profit
 from .report import build_summary, candidate_to_row, send_discord, webhook_from_config, write_csv
-from .sources import ManualSheetSource, RakutenSource, SurugayaSource, build_session, make_observed_on
+from .sources import (
+    ManualSheetSource,
+    RakutenSource,
+    SurugayaSource,
+    YahooShoppingSource,
+    build_session,
+    make_observed_on,
+)
 from .strategy import evaluate, select_daily
 
 
@@ -46,6 +53,14 @@ def build_sources(config: dict[str, Any]) -> list[Any]:
             sources.append(RakutenSource(app_id, session, rakuten_cfg, scraping))
         else:
             print(f"[warn] 楽天API: 環境変数 {rakuten_cfg.get('app_id_env', 'RAKUTEN_APP_ID')} 未設定のためスキップ")
+
+    yahoo_cfg = sources_cfg.get("yahoo_shopping", {})
+    if yahoo_cfg.get("enabled", False):
+        app_id = os.getenv(yahoo_cfg.get("app_id_env", "YAHOO_APP_ID"))
+        if app_id:
+            sources.append(YahooShoppingSource(app_id, session, yahoo_cfg, scraping))
+        else:
+            print(f"[warn] Yahoo!ショッピングAPI: 環境変数 {yahoo_cfg.get('app_id_env', 'YAHOO_APP_ID')} 未設定のためスキップ")
 
     surugaya_cfg = sources_cfg.get("surugaya", {})
     if surugaya_cfg.get("enabled", False):
