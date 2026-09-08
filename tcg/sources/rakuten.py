@@ -8,8 +8,11 @@ from ..models import Observation, Product
 from .base import polite_sleep, timeouts
 
 
-# 楽天ウェブサービス 楽天市場商品検索API（要 applicationId）
-ENDPOINT = "https://app.rakuten.co.jp/services/api/IchibaItem/Search/20220601"
+# 楽天ウェブサービス 楽天市場商品検索API。
+# 2026-02-10 の基盤更新で、ドメインが openapi.rakuten.co.jp に変わり、
+# applicationId に加えて accessKey（アクセスキー）もクエリで必須になった。
+# 旧ドメイン app.rakuten.co.jp は 401 "specify valid access token" を返す。
+ENDPOINT = "https://openapi.rakuten.co.jp/services/api/IchibaItem/Search/20220601"
 
 
 class RakutenSource:
@@ -23,11 +26,14 @@ class RakutenSource:
         session: requests.Session,
         settings: dict[str, Any],
         scraping: dict[str, Any],
+        access_key: str | None = None,
     ) -> None:
         self.app_id = app_id
+        self.access_key = access_key
         self.session = session
         self.settings = settings
         self.scraping = scraping
+        self.endpoint = str(settings.get("endpoint") or ENDPOINT)
 
     def fetch(self, product: Product) -> list[Observation]:
         polite_sleep(float(self.settings.get("request_delay_seconds", 1)))
@@ -40,7 +46,9 @@ class RakutenSource:
             "availability": 1,
             "imageFlag": 0,
         }
-        response = self.session.get(ENDPOINT, params=params, timeout=timeouts(self.scraping))
+        if self.access_key:
+            params["accessKey"] = self.access_key
+        response = self.session.get(self.endpoint, params=params, timeout=timeouts(self.scraping))
         response.raise_for_status()
         return parse_items(response.json(), product, self.settings)
 

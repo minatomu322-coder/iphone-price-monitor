@@ -70,7 +70,9 @@ flea_market:
 sources:
   rakuten:
     enabled: true
-    app_id_env: "RAKUTEN_APP_ID"    # 楽天ウェブサービスのアプリケーションID（Secrets）
+    app_id_env: "RAKUTEN_APP_ID"        # 楽天ウェブサービスのアプリケーションID（Secrets）
+    access_key_env: "RAKUTEN_ACCESS_KEY"  # 2026-02 以降は アクセスキー も必須（Secrets）
+    # endpoint: 既定は openapi.rakuten.co.jp（新基盤）。必要なら上書き可
     hits: 30
     max_listings: 5                 # 商品ごとに保存する最安リスティング数
     request_delay_seconds: 1

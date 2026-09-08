@@ -49,10 +49,15 @@ def build_sources(config: dict[str, Any]) -> list[Any]:
     rakuten_cfg = sources_cfg.get("rakuten", {})
     if rakuten_cfg.get("enabled", False):
         app_id = os.getenv(rakuten_cfg.get("app_id_env", "RAKUTEN_APP_ID"))
-        if app_id:
-            sources.append(RakutenSource(app_id, session, rakuten_cfg, scraping))
+        access_key = os.getenv(rakuten_cfg.get("access_key_env", "RAKUTEN_ACCESS_KEY"))
+        if app_id and access_key:
+            sources.append(RakutenSource(app_id, session, rakuten_cfg, scraping, access_key=access_key))
         else:
-            print(f"[warn] 楽天API: 環境変数 {rakuten_cfg.get('app_id_env', 'RAKUTEN_APP_ID')} 未設定のためスキップ")
+            print(
+                "[warn] 楽天API: 環境変数 "
+                f"{rakuten_cfg.get('app_id_env', 'RAKUTEN_APP_ID')} / "
+                f"{rakuten_cfg.get('access_key_env', 'RAKUTEN_ACCESS_KEY')} が未設定のためスキップ"
+            )
 
     yahoo_cfg = sources_cfg.get("yahoo_shopping", {})
     if yahoo_cfg.get("enabled", False):
