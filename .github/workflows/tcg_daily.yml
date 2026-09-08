@@ -4,7 +4,16 @@ on:
   schedule:
     # 毎朝 07:00 JST（= 22:00 UTC 前日）に1回。価格収集 → 15件選定 → CSV/Discord
     - cron: "0 22 * * *"
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      debug:
+        description: "駿河屋の抽出ログを出す（初回検証用）"
+        type: boolean
+        default: false
+      dry_run:
+        description: "提出履歴を記録せず通知も出さない（検証用）"
+        type: boolean
+        default: false
 
 # tcg_prices.sqlite3 と reports/*.csv をコミットで戻すため書き込み権限が必要
 permissions:
@@ -35,7 +44,8 @@ jobs:
           RAKUTEN_APP_ID: ${{ secrets.RAKUTEN_APP_ID }}
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
           TZ: Asia/Tokyo
-        run: python -m tcg.main
+          TCG_DEBUG: ${{ inputs.debug == true && '1' || '' }}
+        run: python -m tcg.main ${{ inputs.dry_run == true && '--dry-run' || '' }}
 
       - name: DBとCSVの変化をコミットして保存
         run: |

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import re
 from typing import Any
 
@@ -39,6 +40,7 @@ class SurugayaSource:
 
     def fetch(self, product: Product) -> list[Observation]:
         observations: list[Observation] = []
+        debug = bool(os.getenv("TCG_DEBUG"))
         if product.surugaya_url:
             html = self._get(product.surugaya_url)
             if "search" in product.surugaya_url:
@@ -47,12 +49,28 @@ class SurugayaSource:
                 obs = parse_product_page(html, product, product.surugaya_url)
                 if obs:
                     observations.append(obs)
+            if debug:
+                debug_dump(html, SELL_LABELS, product.surugaya_url)
         if product.surugaya_kaitori_url:
             html = self._get(product.surugaya_kaitori_url)
             obs = parse_kaitori_page(html, product, product.surugaya_kaitori_url)
             if obs:
                 observations.append(obs)
+            if debug:
+                debug_dump(html, KAITORI_LABELS, product.surugaya_kaitori_url)
         return observations
+
+
+def debug_dump(html: str, labels: list[str], url: str) -> None:
+    """TCG_DEBUG=1 のとき、ラベル周辺のテキストをログに出して抽出結果を検証できるようにする。"""
+    text = _flatten(html)
+    print(f"[debug] {url} ({len(html)} bytes) price={labeled_price(text, labels)} stock={detect_stock(text)}")
+    for label in labels:
+        for match in list(re.finditer(re.escape(label), text))[:3]:
+            start = max(0, match.start() - 30)
+            print(f"[debug]   [{label}] …{text[start:match.end() + 60]}…")
+    if not any(label in text for label in labels):
+        print(f"[debug]   ラベル未検出。先頭: {text[:300]}")
 
 
 def _flatten(html: str) -> str:
