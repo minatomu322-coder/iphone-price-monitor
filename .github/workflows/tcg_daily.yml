@@ -48,8 +48,8 @@ jobs:
         if: ${{ github.event_name == 'push' || inputs.debug == true }}
         run: python -m tcg.probe
 
-      - name: 候補ページの構造ダンプ（検証時のみ）
-        if: ${{ github.event_name == 'push' || inputs.debug == true }}
+      - name: 候補ページの構造ダンプ（手動デバッグ時のみ）
+        if: ${{ inputs.debug == true }}
         run: python -m tcg.dump
 
       - name: 価格収集と候補抽出を実行

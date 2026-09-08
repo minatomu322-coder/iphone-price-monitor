@@ -14,22 +14,21 @@ from .sources import build_session
 
 
 CANDIDATES = [
-    # 既存ソース（403確認用）
-    "https://www.suruga-ya.jp/kaitori/kaitori_detail/GN285556",
-    "https://www.suruga-ya.jp/product/detail/GN285556",
-    # 公式API（キー無しでも「到達できるか」は分かる。400/401が返れば到達OK）
-    "https://app.rakuten.co.jp/services/api/IchibaItem/Search/20220601?format=json&keyword=test",
+    # 楽天 新基盤（2026-02〜）のパス候補。キー無しで 400/401 が返るものが正しいパス（404は不在）
+    "https://openapi.rakuten.co.jp/services/api/IchibaItem/Search/20220601?format=json&keyword=test",
+    "https://openapi.rakuten.co.jp/ichiba/item/search/20220601?format=json&keyword=test",
+    "https://openapi.rakuten.co.jp/api/IchibaItem/Search/20220601?format=json&keyword=test",
+    "https://openapi.rakuten.co.jp/ichibaitem/search/20220601?format=json&keyword=test",
+    # Yahoo!ショッピングAPI（401＝到達OK）
     "https://shopping.yahooapis.jp/ShoppingWebService/V3/itemSearch?query=test",
-    # 買取価格を公開している専門店・買取店
-    "https://buy.dorasuta.jp/pokemon-card/product?pid=489979",
-    "https://www.c-labo-kaitori.jp/product/55856",
-    "https://duke-kaitori.jp/product/349-190/",
-    "https://kaitori-toretoku.jp/buypricelist/pokemon",
-    "https://yuyu-tei.jp/",
-    "https://www.cardrush-pokemon.jp/",
-    # 相場アグリゲータ（販売/買取の推移）
-    "https://price-base.com/pokemon/card/charizard-349-190-sar",
-    "https://pokecazilla.com/products/detail/21249",
+    # 採用ソースの一覧ページ（URLの存在確認）
+    "https://price-base.com/useful/pokemon-kaitorilist",
+    "https://price-base.com/useful/fusionworld-kaitorilist",
+    "https://kaitori-toretoku.jp/buypricelist/onepiece",
+    "https://www.cardrush-op.jp/product-list?keyword=%E3%83%8A%E3%83%9F",
+    # 参考: 403 だったソース（再確認用）
+    "https://www.suruga-ya.jp/product/detail/GN285556",
+    "https://cardrush.media/pokemon/buying_prices",
 ]
 
 LABELS = ["買取価格", "買取", "販売価格", "価格"]

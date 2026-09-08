@@ -85,6 +85,25 @@ sources:
     max_listings: 5
     request_delay_seconds: 1
     postage_estimate: 300
+  # ---- 2026-09 の到達性検証で Actions から 200 かつ robots.txt が一般UAを許可していたソース ----
+  cardrush:                         # カードラッシュ通販（販売価格 = buy側）。タイトル別ドメイン
+    enabled: true
+    request_delay_seconds: 3
+    max_listings: 5
+    exclude_conditions: ["PSA", "鑑定", "状態B", "状態C", "状態D", "キズ", "傷"]
+  toretoku:                         # トレトク 買取価格表（sell側 kaitori）。ポケカ／ワンピのみ
+    enabled: true
+    request_delay_seconds: 3
+    urls:
+      pokemon: "https://kaitori-toretoku.jp/buypricelist/pokemon"
+      onepiece: "https://kaitori-toretoku.jp/buypricelist/onepiece"
+  pricebase:                        # PRICE BASE 買取表（sell側 kaitori）。3タイトル
+    enabled: true
+    request_delay_seconds: 5        # robots.txt の Crawl-delay: 5 に従う
+    urls:
+      pokemon: "https://price-base.com/useful/pokemon-kaitorilist"
+      onepiece: "https://price-base.com/useful/onepiece-kaitorilist"
+      fusionworld: "https://price-base.com/useful/fusionworld-kaitorilist"
   surugaya:
     # 2026-09 検証: GitHub Actions からのアクセスは全件 403（Cloudflare）で拒否されるため無効化。
     # 回避策は行わない。自宅PCなど通常の回線から手動実行する場合のみ true にする。

@@ -15,9 +15,12 @@ from .models import Candidate, Product
 from .profit import compute_profit
 from .report import build_summary, candidate_to_row, send_discord, webhook_from_config, write_csv
 from .sources import (
+    CardrushSource,
     ManualSheetSource,
+    PriceBaseSource,
     RakutenSource,
     SurugayaSource,
+    ToretokuSource,
     YahooShoppingSource,
     build_session,
     make_observed_on,
@@ -66,6 +69,18 @@ def build_sources(config: dict[str, Any]) -> list[Any]:
             sources.append(YahooShoppingSource(app_id, session, yahoo_cfg, scraping))
         else:
             print(f"[warn] Yahoo!ショッピングAPI: 環境変数 {yahoo_cfg.get('app_id_env', 'YAHOO_APP_ID')} 未設定のためスキップ")
+
+    cardrush_cfg = sources_cfg.get("cardrush", {})
+    if cardrush_cfg.get("enabled", False):
+        sources.append(CardrushSource(session, cardrush_cfg, scraping))
+
+    toretoku_cfg = sources_cfg.get("toretoku", {})
+    if toretoku_cfg.get("enabled", False):
+        sources.append(ToretokuSource(session, toretoku_cfg, scraping))
+
+    pricebase_cfg = sources_cfg.get("pricebase", {})
+    if pricebase_cfg.get("enabled", False):
+        sources.append(PriceBaseSource(session, pricebase_cfg, scraping))
 
     surugaya_cfg = sources_cfg.get("surugaya", {})
     if surugaya_cfg.get("enabled", False):
