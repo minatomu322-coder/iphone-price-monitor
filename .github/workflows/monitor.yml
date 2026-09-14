@@ -1,11 +1,13 @@
 name: iPhone買取価格モニター
 
+# ★ 自動実行（30分ごと・毎朝10:00 JST）は停止中。
+#   再開するときは下の schedule ブロックのコメントを外してください。
 on:
-  schedule:
-    # 30分ごと（変化時のみ通知）。GitHubのcronはUTC基準。
-    - cron: "*/30 * * * *"
-    # 毎朝10:00 JST（=01:00 UTC）にデイリーまとめを必ず通知（FORCE_NOTIFY）。
-    - cron: "0 1 * * *"
+  # schedule:
+  #   # 30分ごと（変化時のみ通知）。GitHubのcronはUTC基準。
+  #   - cron: "*/30 * * * *"
+  #   # 毎朝10:00 JST（=01:00 UTC）にデイリーまとめを必ず通知（FORCE_NOTIFY）。
+  #   - cron: "0 1 * * *"
   workflow_dispatch: {}          # 手動実行ボタン（通常動作＝変化時のみ）
 
 # prices.sqlite3 をリポジトリに commit で戻すため書き込み権限が必要
